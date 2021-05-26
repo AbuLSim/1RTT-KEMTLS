@@ -235,11 +235,9 @@ pub fn read_vec_u16<T: Codec>(r: &mut Reader) -> Option<Vec<T>> {
     let mut ret: Vec<T> = Vec::new();
     let len = usize::from(u16::read(r)?);
     let mut sub = r.sub(len)?;
-
     while sub.any_left() {
         ret.push(T::read(&mut sub)?);
     }
-
     Some(ret)
 }
 

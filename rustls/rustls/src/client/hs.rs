@@ -234,17 +234,20 @@ fn emit_client_hello_for_retry(sess: &mut ClientSessionImpl,
          // 1RTT-KEMTLS
         // the folowing two conditions are enough for the prototype; for real deployement one needs to make sure
         // that the client uses KEM algorithms i.e. leaf certificate signature is a KEM  
-        if sess.config.client_auth_cert_resolver.has_certs() && sess.config.epoch_1rtt.is_some(){            
-            if let Some((extkemtls, sskemtls)) = ClientExtension::encapsulate_1rtt_pk(&sess.config.pk_1rtt) {                
-                exts.push(extkemtls);
-                proactive_static_shared_secret_kemtls = Some(sskemtls);
-                handshake.print_runtime("CREATED PDK 1RTT-KEMTLS ENCAPSULATION")
-            } else {
-                // send the RFC7924 thing if we're not doing PDK
-                exts.push(ClientExtension::make_cached_certs(&sess.config.known_certificates));
+        if sess.config.client_auth_cert_resolver.has_certs() && sess.config.epoch_1rtt.is_some(){
+            if let Some(epoch) = sess.config.epoch_1rtt.clone() {
+                if let Some((extkemtls, sskemtls)) = ClientExtension::encapsulate_1rtt_pk(&sess.config.pk_1rtt,epoch) {                
+                    exts.push(extkemtls);
+                    proactive_static_shared_secret_kemtls = Some(sskemtls);
+                    handshake.print_runtime("CREATED PDK 1RTT-KEMTLS ENCAPSULATION")
+                } else {
+                    // send the RFC7924 thing if we're not doing PDK
+                    exts.push(ClientExtension::make_cached_certs(&sess.config.known_certificates));
+                }
             }
         }
     }
+    
 
     if sess.config.ct_logs.is_some() {
         exts.push(ClientExtension::SignedCertificateTimestampRequest);
@@ -319,6 +322,8 @@ fn emit_client_hello_for_retry(sess: &mut ClientSessionImpl,
     let early_key_schedule = if fill_in_binder {
         Some(tls13::fill_in_psk_binder(sess, &mut handshake, &mut chp))
     } else if let Some(ss) = &proactive_static_shared_secret {
+        // This also applies to 1RTT-KEMTLS
+        // ES <- HKDF.Extract(0, KS)
         Some(KeyScheduleEarly::new(ALL_CIPHERSUITES[0].hkdf_algorithm, ss.as_ref()))
     } else {
         None
@@ -393,6 +398,8 @@ fn emit_client_hello_for_retry(sess: &mut ClientSessionImpl,
         if let Some(mut certkey) = maybe_certkey {
             if certkey.key.algorithm() == SignatureAlgorithm::KEMTLS {
                 tls13::emit_fake_ccs(&mut handshake, sess);
+                
+                // CHTS <- HKDF.expand(HS,"c hs traffic", CH..SH)
                 let client_early_traffic_secret = early_key_schedule
                     .as_ref()
                     .unwrap()

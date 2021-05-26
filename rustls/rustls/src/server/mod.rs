@@ -26,6 +26,9 @@ mod tls13;
 mod common;
 pub mod handy;
 
+/// 1RTT-KEMTLS
+use crate::epoch;
+
 /// A trait for the ability to store server session data.
 ///
 /// The keys and values are opaque.
@@ -180,6 +183,12 @@ pub struct ServerConfig {
     /// does nothing.
     pub key_log: Arc<dyn KeyLog>,
 
+    /// 1RTT-KEMTLS server temporary secret key
+    pub key_1rtt: Arc<Box<dyn sign::SigningKey>>,
+    
+    /// 1RTT-KEMTLS server epoch number
+    pub epoch_1rtt: Option<epoch::Epoch>,
+
     /// Amount of early data to accept; 0 to disable.
     #[cfg(feature = "quic")]    // TLS support unimplemented
     #[doc(hidden)]
@@ -230,6 +239,11 @@ impl ServerConfig {
             versions: vec![ ProtocolVersion::TLSv1_3, ProtocolVersion::TLSv1_2 ],
             verifier: client_cert_verifier,
             key_log: Arc::new(NoKeyLog {}),
+
+            // 1RTT-KEMTLS
+            key_1rtt: Arc::new(Box::new(sign::NoKey {})),
+            epoch_1rtt: None,
+
             #[cfg(feature = "quic")]
             max_early_data_size: 0,
         }
@@ -311,6 +325,16 @@ impl ServerConfig {
     /// Overrides the default `ClientCertVerifier` with something else.
     pub fn set_client_certificate_verifier(&mut self, verifier: Arc<dyn verify::ClientCertVerifier>) {
         self.verifier = verifier;
+    }
+
+
+    /// 1RTT-KEMTLS setting public key and epoch
+    pub fn set_key_epoch(&mut self, key_1rtt: &key::PrivateKey, epoch_1rtt: epoch::Epoch) -> Result<(),TLSError>{
+        let privkey =  sign::any_supported_type(key_1rtt)
+                            .map_err(|_| TLSError::General("invalid private key".into()))?;
+        self.key_1rtt = Arc::new(privkey);
+        self.epoch_1rtt = Some(epoch_1rtt);
+        Ok(())
     }
 }
 
@@ -394,8 +418,7 @@ impl ServerSessionImpl {
         // For handshake messages, we need to join them before parsing
         // and processing.
         if self.common.handshake_joiner.want_message(&msg) {
-            self.common.handshake_joiner.take_message(msg)
-                .ok_or_else(|| {
+            self.common.handshake_joiner.take_message(msg).ok_or_else(|| {
                             self.common.send_fatal_alert(AlertDescription::DecodeError);
                             TLSError::CorruptMessagePayload(ContentType::Handshake)
                             })?;
@@ -458,7 +481,6 @@ impl ServerSessionImpl {
         if self.common.message_deframer.desynced {
             return Err(TLSError::CorruptMessage);
         }
-
         while let Some(msg) = self.common.message_deframer.frames.pop_front() {
             match self.process_msg(msg) {
                 Ok(_) => {}

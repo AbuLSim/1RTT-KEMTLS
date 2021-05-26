@@ -54,7 +54,6 @@ impl HandshakeJoiner {
         // Input must be opaque, otherwise we might have already
         // lost information!
         let payload = msg.take_opaque_payload().unwrap();
-
         self.buf.extend_from_slice(&payload.0[..]);
 
         let mut count = 0;

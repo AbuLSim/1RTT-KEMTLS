@@ -9,6 +9,23 @@ use webpki;
 use std::{sync::Arc, convert::TryInto};
 use std::mem;
 
+/// 1-RTT KEMTLS
+/// No key structure for initializing the server configuration 
+pub struct NoKey {}
+impl SigningKey for NoKey {
+    fn choose_scheme(&self, _offered: &[SignatureScheme]) -> Option<Box<dyn Signer>>{
+        None
+    }
+    fn algorithm(&self) -> SignatureAlgorithm{
+        unimplemented!()
+    }
+    
+    /// Get bytes
+    fn get_bytes(&self) -> &[u8] {
+        unimplemented!()
+    }
+}
+
 /// An abstract signing key.
 pub trait SigningKey : Send + Sync {
     /// Choose a `SignatureScheme` from those offered.

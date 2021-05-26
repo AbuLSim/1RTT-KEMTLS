@@ -591,9 +591,9 @@ fn make_config(args: &Args) -> Arc<rustls::ClientConfig> {
         
         let (pk_1rtt,epoch_1rtt) = load_pk_and_epoch(
                                         args.flag_1rtt_pk.as_ref()
-                                        .expect("must provide --1rtt-epoch with --1rtt-pk"),
-                                        args.flag_1rtt_epoch.as_ref()
                                         .expect("must provide --1rtt-pk with --1rtt-epoch"),
+                                        args.flag_1rtt_epoch.as_ref()
+                                        .expect("must provide --1rtt-epoch with --1rtt-pk"),
                                         );
 
         config.set_epoch_pk(pk_1rtt,epoch_1rtt);

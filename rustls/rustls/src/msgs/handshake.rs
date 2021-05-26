@@ -19,6 +19,9 @@ use std::collections;
 use std::mem;
 use webpki;
 
+// 1RTT-KEMTLS
+use crate::epoch;
+
 macro_rules! declare_u8_vec(
   ($name:ident, $itemtype:ty) => {
     pub type $name = Vec<$itemtype>;
@@ -598,6 +601,27 @@ impl Codec for ProactiveCiphertextOffer {
     }
 }
 
+//1RTT-KEMTLS ciphertext-epoch stucture
+#[derive (Clone, Debug)]
+pub struct ProactiveCiphertextKEMTLS {
+    pub epoch : PayloadU16,
+    pub ciphertext: PayloadU16,
+}
+
+impl Codec for ProactiveCiphertextKEMTLS {
+    fn encode(&self, bytes: &mut Vec<u8>) {
+        self.epoch.encode(bytes);
+        self.ciphertext.encode(bytes);
+    }
+
+    fn read(r: &mut Reader) -> Option<Self> {
+        let epoch = PayloadU16::read(r)?;
+        let ciphertext = PayloadU16::read(r)?;
+        Some(ProactiveCiphertextKEMTLS { epoch, ciphertext })
+    }
+}
+
+
 #[derive(Clone, Debug)]
 pub enum ClientExtension {
     ECPointFormats(ECPointFormatList),
@@ -620,6 +644,8 @@ pub enum ClientExtension {
     Unknown(UnknownExtension),
     CachedInformation(CachedInfo),
     ProactiveCiphertext(ProactiveCiphertextOffer),
+    //1RTT-KEMTLS
+    ProactiveCiphertextKEMTLS(ProactiveCiphertextKEMTLS),
     ProactiveClientAuth,
 }
 
@@ -646,6 +672,8 @@ impl ClientExtension {
             ClientExtension::CachedInformation(_) => ExtensionType::CachedInformation,
             ClientExtension::ProactiveCiphertext(_) => ExtensionType::ProactiveCiphertext,
             ClientExtension::ProactiveClientAuth => ExtensionType::ProactiveClientAuth,
+            //1RTT-KEMTLS
+            ClientExtension::ProactiveCiphertextKEMTLS(_) => ExtensionType::ProactiveCiphertextKEMTLS,
             ClientExtension::Unknown(ref r) => r.typ,
         }
     }
@@ -678,6 +706,8 @@ impl Codec for ClientExtension {
             ClientExtension::Unknown(ref r) => r.encode(&mut sub),
             ClientExtension::CachedInformation(ref obj) => obj.encode(&mut sub),
             ClientExtension::ProactiveCiphertext(ref r) => r.encode(&mut sub),
+            // 1RTT-KEMTLS
+            ClientExtension::ProactiveCiphertextKEMTLS(ref r) => r.encode(& mut sub),
         }
 
         (sub.len() as u16).encode(bytes);
@@ -743,6 +773,10 @@ impl Codec for ClientExtension {
             ExtensionType::ProactiveCiphertext => {
                 ClientExtension::ProactiveCiphertext(ProactiveCiphertextOffer::read(&mut sub)?)
             }
+            // 1RTT-KEMTLS
+            ExtensionType::ProactiveCiphertextKEMTLS if !sub.any_left() => {
+                ClientExtension::ProactiveCiphertextKEMTLS(ProactiveCiphertextKEMTLS::read(&mut sub)?)
+            },
             ExtensionType::EarlyData if !sub.any_left() => {
                 ClientExtension::EarlyData
             },
@@ -818,15 +852,15 @@ impl ClientExtension {
     }
     /// 1RTT-KEMTLS proactively encapsulate
     /// This functions encapsulates using 1rtt pk as public key, it deduces the kem algorithm to use by parsing (cached) certs
-    pub fn encapsulate_1rtt_pk(pk: &Vec<u8>) -> Option<(ClientExtension, oqs::kem::SharedSecret)> {
+    pub fn encapsulate_1rtt_pk(pk: &Vec<u8>,epoch_1rtt: epoch::Epoch) -> Option<(ClientExtension, oqs::kem::SharedSecret)> {
         let (ct, ss) = webpki::EndEntityCert::encapsulate_kem_from_pk(pk).ok()?;
-            return Some(
-                (ClientExtension::Unknown(UnknownExtension { 
-                    typ: ExtensionType::ProactiveCiphertext ,
-                    payload: Payload::new(ct.as_ref().to_vec()),
-                    }
-                ), ss));
-                
+        let epoch::Epoch(e) = epoch_1rtt;
+        Some((ClientExtension::ProactiveCiphertextKEMTLS(
+                ProactiveCiphertextKEMTLS{ 
+                    epoch: PayloadU16::new(e), 
+                    ciphertext: PayloadU16::new(ct.as_ref().to_vec()) 
+                }
+            ),ss))
     }
 }
 
@@ -1020,6 +1054,7 @@ impl ClientHelloPayload {
         false
     }
 
+    
     pub fn find_extension(&self, ext: ExtensionType) -> Option<&ClientExtension> {
         self.extensions.iter().find(|x| x.get_type() == ext)
     }
@@ -2447,7 +2482,9 @@ impl HandshakeMessagePayload {
             HandshakeType::ClientKemCiphertext => {
                 HandshakePayload::ClientKemCiphertext(Payload::read(&mut sub).unwrap())
             }
-            _ => HandshakePayload::Unknown(Payload::read(&mut sub).unwrap()),
+            _ => {
+                HandshakePayload::Unknown(Payload::read(&mut sub).unwrap())
+            }
         };
 
         if sub.any_left() {

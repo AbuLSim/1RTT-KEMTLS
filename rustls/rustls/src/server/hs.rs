@@ -577,6 +577,7 @@ impl State for ExpectClientHello {
         }
 
         if client_hello.has_duplicate_extension() {
+            println!("Double Extensions");
             return Err(decode_error(sess, "client sent duplicate extensions"));
         }
 
