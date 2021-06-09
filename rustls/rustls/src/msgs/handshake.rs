@@ -604,7 +604,7 @@ impl Codec for ProactiveCiphertextOffer {
 //1RTT-KEMTLS ciphertext-epoch stucture
 #[derive (Clone, Debug)]
 pub struct ProactiveCiphertextKEMTLS {
-    pub epoch : PayloadU16,
+    pub epoch : PayloadU8,
     pub ciphertext: PayloadU16,
 }
 
@@ -615,7 +615,7 @@ impl Codec for ProactiveCiphertextKEMTLS {
     }
 
     fn read(r: &mut Reader) -> Option<Self> {
-        let epoch = PayloadU16::read(r)?;
+        let epoch = PayloadU8::read(r)?;
         let ciphertext = PayloadU16::read(r)?;
         Some(ProactiveCiphertextKEMTLS { epoch, ciphertext })
     }
@@ -657,7 +657,7 @@ impl ClientExtension {
             ClientExtension::SignatureAlgorithms(_) => ExtensionType::SignatureAlgorithms,
             ClientExtension::ServerName(_) => ExtensionType::ServerName,
             ClientExtension::SessionTicketRequest |
-                ClientExtension::SessionTicketOffer(_) => ExtensionType::SessionTicket,
+            ClientExtension::SessionTicketOffer(_) => ExtensionType::SessionTicket,
             ClientExtension::Protocols(_) => ExtensionType::ALProtocolNegotiation,
             ClientExtension::SupportedVersions(_) => ExtensionType::SupportedVersions,
             ClientExtension::KeyShare(_) => ExtensionType::KeyShare,
@@ -774,7 +774,7 @@ impl Codec for ClientExtension {
                 ClientExtension::ProactiveCiphertext(ProactiveCiphertextOffer::read(&mut sub)?)
             }
             // 1RTT-KEMTLS
-            ExtensionType::ProactiveCiphertextKEMTLS if !sub.any_left() => {
+            ExtensionType::ProactiveCiphertextKEMTLS=> {
                 ClientExtension::ProactiveCiphertextKEMTLS(ProactiveCiphertextKEMTLS::read(&mut sub)?)
             },
             ExtensionType::EarlyData if !sub.any_left() => {
@@ -857,7 +857,7 @@ impl ClientExtension {
         let epoch::Epoch(e) = epoch_1rtt;
         Some((ClientExtension::ProactiveCiphertextKEMTLS(
                 ProactiveCiphertextKEMTLS{ 
-                    epoch: PayloadU16::new(e), 
+                    epoch: PayloadU8::new(e), 
                     ciphertext: PayloadU16::new(ct.as_ref().to_vec()) 
                 }
             ),ss))
@@ -1217,6 +1217,15 @@ impl ClientHelloPayload {
                 }
             })
     }
+
+    // 1RTT-KEMTLS get_extension
+    pub fn get_proactive_ciphertext_kemtls(&self) -> Option<&ProactiveCiphertextKEMTLS> {
+        let ext = self.find_extension(ExtensionType::ProactiveCiphertextKEMTLS)?;
+        match *ext {
+            ClientExtension::ProactiveCiphertextKEMTLS(ref cipher) => Some(cipher),
+            _ => None,
+        }
+    } 
 }
 
 #[derive(Debug)]

@@ -330,6 +330,7 @@ impl ServerConfig {
 
     /// 1RTT-KEMTLS setting public key and epoch
     pub fn set_key_epoch(&mut self, key_1rtt: &key::PrivateKey, epoch_1rtt: epoch::Epoch) -> Result<(),TLSError>{
+        // parse the der PrivateKey into any supported type key
         let privkey =  sign::any_supported_type(key_1rtt)
                             .map_err(|_| TLSError::General("invalid private key".into()))?;
         self.key_1rtt = Arc::new(privkey);

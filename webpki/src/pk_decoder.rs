@@ -1,6 +1,8 @@
 use crate::{der, Error};
 use crate::signed_data::SubjectPublicKeyInfo;
 
+
+// This file is used for 1RTT-KEMTLS
 pub (crate) fn parse_public_key<'a>(pk_der: &'a [u8]) -> Result<SubjectPublicKeyInfo<'a>, Error> {
     // transform pk_der into untrusted Input
     let pk = untrusted::Input::from(pk_der);

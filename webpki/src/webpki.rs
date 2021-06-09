@@ -202,14 +202,15 @@ impl<'a> EndEntityCert<'a> {
         encapsulate(algorithm, spki.key_value)
     }
 
-    /// 1RTT-KEMTLS Checking certificate algorithm and encapsulating using pk
-    /// Try 1 encapsulates 
+    /// 1RTT-KEMTLS Detecting encapsulating algorithm based on public key information
+    /// and encapsulating using pk value. pk must be DER encoded.
     pub fn encapsulate_kem_from_pk(pk: &Vec<u8>)-> Result<(oqs::kem::Ciphertext, oqs::kem::SharedSecret), Error>{        
         let pk_arr: &[u8] = &pk; // bytes: &[u8]
         let pk_struct = pk_decoder::parse_public_key(pk_arr)?;
         let algorithm = key_id_to_kem(pk_struct.algorithm_id_value)?;
         encapsulate(algorithm,pk_struct.key_value)
     }
+
 
     /// Verifies that the end-entity certificate is valid for use by a TLS
     /// client.

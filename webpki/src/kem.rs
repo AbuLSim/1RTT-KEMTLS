@@ -22,7 +22,7 @@ pub struct KemAlgorithm {
 pub fn decapsulate(
     alg: &KemAlgorithm, private_key: oqs::kem::SecretKeyRef, ciphertext: untrusted::Input,
 ) -> Result<Vec<u8>, error::Error> {
-    let kem = oqs::kem::Kem::new(alg.kem).expect("algorithm disabled");
+    let kem = oqs::kem::Kem::new(alg.kem).expect("algorithm disabled");    
     let ciphertext = kem
         .ciphertext_from_bytes(ciphertext.as_slice_less_safe())
         .ok_or(error::Error::KEMFailure)?;

@@ -437,7 +437,9 @@ Options:
                         signed by those roots provided in CERTFILE.
     --require-auth      Send a fatal alert if the client does not complete client
                         authentication.
-    --1rtt-key KEYFILE      Read server private key to activate 1RTT-KEMTLS
+    --1rtt-key KEYFILE  Read server private key to activate 1RTT-KEMTLS
+                        WARNING: this private key has to be of the same algorithm
+                        As key from KEYFILE
     --1rtt-epoch EPOCH  Read server epoch to activate 1RTT-KEMTLS
     --resumption        Support session resumption.
     --tickets           Support tickets.
@@ -637,6 +639,7 @@ fn make_config(args: &Args) -> Arc<rustls::ServerConfig> {
             let privkey_1rtt = load_private_key(args.flag_1rtt_key.as_ref()
                                 .expect("must provide --1rtt-key with --1rtt-epoch"));
             
+            // parse the der key into any supported type key
             config.set_key_epoch(&privkey_1rtt,epoch_1rtt)
                             .expect("bad 1RTT-KEMTLS private key");
         }else{

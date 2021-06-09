@@ -203,9 +203,15 @@ pub fn start_handshake_traffic(sess: &mut ClientSessionImpl,
         } else {
             return Err(TLSError::PeerMisbehavedError("server selected unoffered psk".to_string()));
         }
+        
+        // HS <- HKDF.Extract(dES, ss)
         early_key_schedule.unwrap()
             .into_handshake(&shared)
     } else if let Some(_offer) = server_hello.find_extension(ExtensionType::ProactiveCiphertext) {
+        // 1RTT-KEMTLS
+        if let Some(_rtt) = server_hello.find_extension(ExtensionType::ProactiveCiphertextKEMTLS){
+            println!("you should change stuff in here");
+        }
         debug!("Using PDK");
         // TODO check if offer is actually what's been offered.
         early_key_schedule.unwrap().into_handshake(&shared)
@@ -218,7 +224,6 @@ pub fn start_handshake_traffic(sess: &mut ClientSessionImpl,
         KeyScheduleNonSecret::new(suite.hkdf_algorithm)
             .into_handshake(&shared)
     };
-
     // Remember what KX group the server liked for next time.
     save_kx_hint(sess, handshake.dns_name.as_ref(), their_key_share.group);
 
@@ -228,7 +233,8 @@ pub fn start_handshake_traffic(sess: &mut ClientSessionImpl,
 
     handshake.hash_at_client_recvd_server_hello =
         handshake.transcript.get_current_hash();
-
+    
+    // simon: CHTS <- HKDF.Expand(HS, "c hs traffic", CH..SH)
     let _maybe_write_key = if !sess.early_data.is_enabled() {
         // Set the client encryption key for handshakes if early data is not used
         let write_key = key_schedule
@@ -243,10 +249,14 @@ pub fn start_handshake_traffic(sess: &mut ClientSessionImpl,
         None
     };
 
+    // simon: SHTS <- HKDF.Expand(HS, "s hs traffic", CH..SH)
     let read_key = key_schedule
         .server_handshake_traffic_secret(&handshake.hash_at_client_recvd_server_hello,
                                          &*sess.config.key_log,
-                                         &handshake.randoms.client);
+                                        &handshake.randoms.client);
+    
+    
+    // simon: decrypt what the server sends
     sess.common
         .record_layer
         .set_message_decrypter(cipher::new_tls13_read(suite, &read_key));

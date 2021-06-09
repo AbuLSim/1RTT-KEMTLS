@@ -13,12 +13,19 @@ use ring::{
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum SecretKind {
     ResumptionPSKBinderKey,
+    // ES
     ClientEarlyTrafficSecret,
+    // CHTS
     ClientHandshakeTrafficSecret,
+    // SHTS
     ServerHandshakeTrafficSecret,
+    // CAHTS
     ClientAuthenticatedHandshakeTrafficSecret,
+    // SAHTS
     ServerAuthenticatedHandshakeTrafficSecret,
+    // CATS
     ClientApplicationTrafficSecret,
+    // SATS
     ServerApplicationTrafficSecret,
     ExporterMasterSecret,
     ResumptionMasterSecret,
@@ -553,6 +560,7 @@ impl KeySchedule {
         T: for<'a> From<hkdf::Okm<'a, L>>,
         L: hkdf::KeyType,
     {
+        println!("kind: {:?}",kind);
         hkdf_expand(&self.current, key_type, kind.to_bytes(), hs_hash)
     }
 
@@ -564,6 +572,7 @@ impl KeySchedule {
         client_random: &[u8; 32],
     ) -> hkdf::Prk {
         let log_label = kind.log_label().expect("not a loggable secret");
+        println!("{:?}",log_label);
         if key_log.will_log(log_label) {
             let secret = self
                 .derive::<PayloadU8, _>(PayloadU8Len(self.algorithm.len()), kind, hs_hash)
@@ -668,6 +677,8 @@ where
     T: for<'a> From<hkdf::Okm<'a, L>>,
     L: hkdf::KeyType,
 {
+    // simon to be erased println
+    println!("{:?}",String::from_utf8_lossy(label));
     hkdf_expand_info(secret, key_type, label, context, |okm| okm.into())
 }
 

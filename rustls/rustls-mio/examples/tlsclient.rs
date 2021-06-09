@@ -630,7 +630,11 @@ fn main() -> Result<(), std::io::Error> {
         println!("Connecting to server for iteration {} of {}", i, num_loops);
         let sock = TcpStream::connect(addr)?;
         sock.set_nodelay(false)?;  // Nagle algorithm switch (false is default)
+
         let mut tlsclient = TlsClient::new(sock, dns_name, config.clone());
+        // tlsclient should now contain the state 
+        // ExpectServerHelloOrRetry(ExpectServerHello)
+
 
         if args.flag_http {
             let httpreq = format!("GET / HTTP/1.0\r\nHost: {}\r\nConnection: \
