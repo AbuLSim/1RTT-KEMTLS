@@ -268,6 +268,21 @@ impl KeyScheduleHandshake {
         }
     }
 
+
+    // 1RTT-KEMTLS calculating MS
+    pub fn into_ssrttkemtls_master_secret(
+        &mut self,
+        ss_ephemeral: &[u8],
+        ss_client : &[u8],
+    ) {
+        // IMS <- HKDF.Extract(dHS,K_e)
+        self.ks.input_secret(ss_ephemeral);
+        // MS <- HKDF.Extract(dIMS,K_c)
+        self.ks.input_secret(ss_client);
+        self.authenticated = true;
+
+    }
+
     pub fn into_kemtlspdk_traffic_with_client_finished_pending(
         mut self, client_shared_secret: Option<&[u8]>
     ) -> KeyScheduleTrafficWithClientFinishedPending {

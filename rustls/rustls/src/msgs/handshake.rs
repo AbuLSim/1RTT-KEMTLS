@@ -880,6 +880,8 @@ pub enum ServerExtension {
     TransportParameters(Vec<u8>),
     EarlyData,
     ProactiveCiphertextAccepted(PayloadU8),
+    // 1RTT-KEMTLS
+    ProactiveCiphertextKEMTLSAccepted(PayloadU8),
     CachedInformation(CachedInfoTypes),
     Unknown(UnknownExtension),
 }
@@ -903,6 +905,8 @@ impl ServerExtension {
             ServerExtension::Unknown(ref r) => r.typ,
             ServerExtension::CachedInformation(_) => ExtensionType::CachedInformation,
             ServerExtension::ProactiveCiphertextAccepted(_) => ExtensionType::ProactiveCiphertext,
+            // 1RTT-KEMTLS
+            ServerExtension::ProactiveCiphertextKEMTLSAccepted(_) => ExtensionType::ProactiveCiphertextKEMTLS,
         }
     }
 }
@@ -928,6 +932,7 @@ impl Codec for ServerExtension {
             ServerExtension::TransportParameters(ref r) => sub.extend_from_slice(r),
             ServerExtension::CachedInformation(ref r) => r.encode(&mut sub),
             ServerExtension::ProactiveCiphertextAccepted(ref r) => r.encode(&mut sub),
+            ServerExtension::ProactiveCiphertextKEMTLSAccepted(ref r) => r.encode(&mut sub),
             ServerExtension::Unknown(ref r) => r.encode(&mut sub),
         }
 
@@ -972,6 +977,8 @@ impl Codec for ServerExtension {
             },
             ExtensionType::CachedInformation => ServerExtension::CachedInformation(CachedInfoTypes::read(&mut sub)?),
             ExtensionType::ProactiveCiphertext => ServerExtension::ProactiveCiphertextAccepted(PayloadU8::read(&mut sub)?),
+            // 1RTT-KEMTLS
+            ExtensionType::ProactiveCiphertextKEMTLS => ServerExtension::ProactiveCiphertextKEMTLSAccepted(PayloadU8::read(&mut sub)?),
             ExtensionType::EarlyData => ServerExtension::EarlyData,
             _ => ServerExtension::Unknown(UnknownExtension::read(typ, &mut sub)?),
         })
