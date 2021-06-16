@@ -22,7 +22,7 @@ use crate::msgs::handshake::ServerExtension;
 use crate::msgs::handshake::Random;
 use crate::msgs::handshake::DigitallySignedStruct;
 use crate::msgs::ccs::ChangeCipherSpecPayload;
-use crate::msgs::base::{Payload, PayloadU8};
+use crate::msgs::base::{Payload, PayloadU8, PayloadU16};
 use crate::msgs::codec::Codec;
 use crate::msgs::persist;
 use crate::server::ServerSessionImpl;
@@ -296,7 +296,6 @@ impl CompleteClientHelloHandling {
                 payload: HandshakePayload::EncryptedExtensions(ep.exts),
             }),
         };
-
         trace!("sending encrypted extensions {:?}", ee);
         self.handshake.transcript.add_message(&ee);
         sess.common.send_msg(ee, true);
@@ -770,7 +769,6 @@ impl CompleteClientHelloHandling {
     ){
         let handshake = &self.handshake;
         handshake.print_runtime("DERIVING MS");
-            let suite = sess.common.get_suite_assert();
         handshake_secret
                     .into_ssrttkemtls_master_secret(ss_ephemeral,ss_client);
         let handshake_hash = handshake.transcript.get_current_hash();
@@ -863,7 +861,7 @@ impl CompleteClientHelloHandling {
         };
 
 
-        if !self.done_retry {
+        if !self.done_retry && !is_ssrttkemtls {
             self.emit_fake_ccs(sess);
         }
         if !is_ssrttkemtls{
@@ -920,7 +918,7 @@ impl CompleteClientHelloHandling {
                 self.handshake.print_runtime("PDK ENCAPSULATING TO CCERT");
                 let (ct, ss) = certificate.encapsulate().map_err(|_| TLSError::DecryptError)?;
                 self.handshake.print_runtime("PDK ENCAPSULATED TO CCERT");
-                let ss_client = ct.into_vec();
+                let ct_client = ct.into_vec();
 
                 // split between 1RTT-KEMTLS and semi-static 1RTT-KEMTLS                
                 if !is_ssrttkemtls {
@@ -930,14 +928,15 @@ impl CompleteClientHelloHandling {
                         version: ProtocolVersion::TLSv1_3,
                         payload: MessagePayload::Handshake(HandshakeMessagePayload {
                             typ: HandshakeType::ClientKemCiphertext,
-                            payload: HandshakePayload::ClientKemCiphertext(Payload::new(ss_client)),
+                            payload: HandshakePayload::ClientKemCiphertext(Payload::new(ct_client)),
                         }),
                     };
                     self.handshake.transcript.add_message(&m);
                     sess.common.send_msg(m, true);
                 } else {
                     // do the semi-static 1RTT-KEMTLS
-                    extensions.push(ServerExtension::ProactiveCiphertextKEMTLSAccepted(PayloadU8::new(ss_client.clone())));
+                    let payload = PayloadU16::new(ct_client);
+                    extensions.push(ServerExtension::ProactiveCiphertextKEMTLSAccepted(payload));
                     let sh = Message{
                         typ: ContentType::Handshake,
                         version: ProtocolVersion::TLSv1_2,
@@ -953,15 +952,18 @@ impl CompleteClientHelloHandling {
                             }),
                         }),
                     };
+
                     #[cfg(feature = "quic")]
                     trace!("sending server hello {:?}", sh);
                     self.handshake.transcript.add_message(&sh);
                     sess.common.send_msg(sh, false);
                     self.handshake.print_runtime("EMITTED SH");
+                    self.emit_fake_ccs(sess);
+
                     // continue the key scheduling
                     self.prepare_finished_ssrttkemtls_eq_epoch(
                         sess, &mut key_schedule,
-                        &ss_ephemeral, &ss_client,
+                        &ss_ephemeral, &ss.clone().into_vec(),
                         false,
                     );
                     //{EE := EncryptedExtensions}_SAHTS
@@ -1077,10 +1079,18 @@ fn emit_finished_kemtlspdk(
     ss: Option<&[u8]>
 ) -> KeyScheduleTrafficWithClientFinishedPending {
     let handshake_hash = handshake.transcript.get_current_hash();
-    let mut key_schedule = key_schedule.into_kemtlspdk_traffic_with_client_finished_pending(ss);
+    let mut key_schedule = if sess.config.epoch_1rtt.is_none(){
+        key_schedule.into_kemtlspdk_traffic_with_client_finished_pending(ss)
+    } else {
+        key_schedule.into_ssrttkemtls_traffic_with_client_finished_pending()
+    };
+
+    // Calculate fk_s <- HKDF.Expand(MS, "s finished")
+    // SF <- HMAC(fk_s, H(CH..EE))
     let verify_data = key_schedule.sign_server_finished_kemtlspdk(&handshake_hash);
     let verify_data_payload = Payload::new(verify_data);
-
+    
+    // send {ServerFinished}_fk_s :SF
     let m = Message {
         typ: ContentType::Handshake,
         version: ProtocolVersion::TLSv1_3,
@@ -1097,6 +1107,8 @@ fn emit_finished_kemtlspdk(
 
     // Now move to application data keys.  Read key change is deferred until
     // the Finish message is received & validated.
+
+    // SATS <- HKDF.Expand(MS, "s app traffic", H(CH..SF))
     let suite = sess.common.get_suite_assert();
     let write_key = key_schedule
         .server_application_traffic_secret(&handshake.hash_at_server_fin,

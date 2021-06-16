@@ -287,10 +287,25 @@ impl KeyScheduleHandshake {
         mut self, client_shared_secret: Option<&[u8]>
     ) -> KeyScheduleTrafficWithClientFinishedPending {
         if let Some(ss) = client_shared_secret {
+            println!("HEREEE");
             self.ks.input_secret(ss);
         } else {
+            println!("THERE");
+
             self.ks.input_empty();
         }
+        KeyScheduleTrafficWithClientFinishedPending {
+            ks: self.ks,
+            handshake_client_traffic_secret: self.current_client_traffic_secret.unwrap(),
+            current_client_traffic_secret: None,
+            current_server_traffic_secret: None,
+            current_exporter_secret: None,
+        }
+    }
+
+
+    pub fn into_ssrttkemtls_traffic_with_client_finished_pending(
+        self) -> KeyScheduleTrafficWithClientFinishedPending {
         KeyScheduleTrafficWithClientFinishedPending {
             ks: self.ks,
             handshake_client_traffic_secret: self.current_client_traffic_secret.unwrap(),

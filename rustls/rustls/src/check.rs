@@ -70,6 +70,5 @@ pub fn check_message(m: &Message,
             });
         }
     }
-
     Ok(())
 }

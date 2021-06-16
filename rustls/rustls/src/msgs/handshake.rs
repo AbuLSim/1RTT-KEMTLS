@@ -881,7 +881,7 @@ pub enum ServerExtension {
     EarlyData,
     ProactiveCiphertextAccepted(PayloadU8),
     // 1RTT-KEMTLS
-    ProactiveCiphertextKEMTLSAccepted(PayloadU8),
+    ProactiveCiphertextKEMTLSAccepted(PayloadU16),
     CachedInformation(CachedInfoTypes),
     Unknown(UnknownExtension),
 }
@@ -978,7 +978,7 @@ impl Codec for ServerExtension {
             ExtensionType::CachedInformation => ServerExtension::CachedInformation(CachedInfoTypes::read(&mut sub)?),
             ExtensionType::ProactiveCiphertext => ServerExtension::ProactiveCiphertextAccepted(PayloadU8::read(&mut sub)?),
             // 1RTT-KEMTLS
-            ExtensionType::ProactiveCiphertextKEMTLS => ServerExtension::ProactiveCiphertextKEMTLSAccepted(PayloadU8::read(&mut sub)?),
+            ExtensionType::ProactiveCiphertextKEMTLS => ServerExtension::ProactiveCiphertextKEMTLSAccepted(PayloadU16::read(&mut sub)?),
             ExtensionType::EarlyData => ServerExtension::EarlyData,
             _ => ServerExtension::Unknown(UnknownExtension::read(typ, &mut sub)?),
         })
@@ -1445,6 +1445,7 @@ impl ServerHelloPayload {
         }
     }
 
+    
     pub fn get_psk_index(&self) -> Option<u16> {
         let ext = self.find_extension(ExtensionType::PreSharedKey)?;
         match *ext {
@@ -1486,6 +1487,14 @@ impl ServerHelloPayload {
         let ext = self.find_extension(ExtensionType::ProactiveCiphertext)?;
         match ext {
             ServerExtension::ProactiveCiphertextAccepted(obj) => Some(obj),
+            _ => None,
+        }
+    }
+
+    pub fn get_accepted_kemtls_ciphertext(&self) -> Option<&PayloadU16> {
+        let ext = self.find_extension(ExtensionType::ProactiveCiphertextKEMTLS)?;
+        match ext {
+            ServerExtension::ProactiveCiphertextKEMTLSAccepted(obj) => Some(obj),
             _ => None,
         }
     }

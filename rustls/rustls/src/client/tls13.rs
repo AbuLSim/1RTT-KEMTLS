@@ -52,6 +52,7 @@ static ALLOWED_PLAINTEXT_EXTS: &[ExtensionType] = &[
     ExtensionType::PreSharedKey,
     ExtensionType::SupportedVersions,
     ExtensionType::ProactiveCiphertext,
+    ExtensionType::ProactiveCiphertextKEMTLS,
 ];
 
 // Only the intersection of things we offer, and those disallowed
@@ -160,13 +161,16 @@ pub fn fill_in_psk_binder(sess: &mut ClientSessionImpl,
 
 pub fn start_handshake_traffic(sess: &mut ClientSessionImpl,
                                early_key_schedule: Option<KeyScheduleEarly>,
+                               handshake_secret: Option<KeyScheduleHandshake>,
                                server_hello: &ServerHelloPayload,
                                handshake: &mut HandshakeDetails,
                                hello: &mut ClientHelloDetails,
+                               client_auth: &mut Option<ClientAuthDetails>,
                             )
                            -> Result<KeyScheduleHandshake, TLSError> {
-    let suite = sess.common.get_suite_assert();
 
+    let suite = sess.common.get_suite_assert();
+    let mut is_ssrttkemtls = false;
     let their_key_share = server_hello.get_key_share()
         .ok_or_else(|| {
             sess.common.send_fatal_alert(AlertDescription::MissingExtension);
@@ -204,17 +208,40 @@ pub fn start_handshake_traffic(sess: &mut ClientSessionImpl,
             return Err(TLSError::PeerMisbehavedError("server selected unoffered psk".to_string()));
         }
         
-        // HS <- HKDF.Extract(dES, ss)
-        early_key_schedule.unwrap()
-            .into_handshake(&shared)
+        // ES <- HKDF.Extract(dES, ss)
+        early_key_schedule.unwrap().into_handshake(&shared)
     } else if let Some(_offer) = server_hello.find_extension(ExtensionType::ProactiveCiphertext) {
         // 1RTT-KEMTLS
         if let Some(_rtt) = server_hello.find_extension(ExtensionType::ProactiveCiphertextKEMTLS){
-            println!("you should change stuff in here");
+            // finding C_c
+            is_ssrttkemtls = true;
+            let shared_proactive_kem_cipher = server_hello.get_accepted_kemtls_ciphertext()
+                                            .ok_or_else(|| {
+                                            sess.common.send_fatal_alert(AlertDescription::MissingExtension);
+            TLSError::PeerMisbehavedError("missing proactive ciphertext".to_string())
+            })?;
+            // finding sk_c
+            let proactive_key_share: Vec<u8>;
+            match client_auth {
+                Some (ref mut client_details) => {
+                    let cert = client_details.cert.take().unwrap();
+                    let eecert = webpki::EndEntityCert::from(&cert[0].0).map_err(TLSError::WebPKIError)?;
+                    handshake.print_runtime("DECAPSULATING FROM CCERT");
+                    proactive_key_share = eecert.decapsulate(&client_details.private_key.take().unwrap(), &shared_proactive_kem_cipher.0).map_err(TLSError::WebPKIError)?;
+                    handshake.print_runtime("DECAPSULATED FROM CCERT");
+                }
+                _ => panic!("client authenthication does not contain anything"),
+            };
+
+            debug!("Using semi static 1RTT-KEMTLS");
+            let mut master_secret = handshake_secret.unwrap();
+            master_secret.into_ssrttkemtls_master_secret(&shared,&proactive_key_share);
+            master_secret
+        }else{
+            debug!("Using PDK");
+            // ES <- HKDF.Extract(dES, ss)
+            early_key_schedule.unwrap().into_handshake(&shared)
         }
-        debug!("Using PDK");
-        // TODO check if offer is actually what's been offered.
-        early_key_schedule.unwrap().into_handshake(&shared)
     } else {
         debug!("Not resuming");
         // Discard the early data key schedule.
@@ -234,29 +261,47 @@ pub fn start_handshake_traffic(sess: &mut ClientSessionImpl,
     handshake.hash_at_client_recvd_server_hello =
         handshake.transcript.get_current_hash();
     
-    // simon: CHTS <- HKDF.Expand(HS, "c hs traffic", CH..SH)
     let _maybe_write_key = if !sess.early_data.is_enabled() {
+        let write_key;
+        if  !is_ssrttkemtls {
+            // CHTS <- HKDF.Expand(HS, "c hs traffic", H(CH..SH))
+            write_key = key_schedule
+                .client_handshake_traffic_secret(&handshake.hash_at_client_recvd_server_hello,
+                                                &*sess.config.key_log,
+                                                &handshake.randoms.client);
+        }else{
+            // CAHTS <- HKDF.Expand(MS, "s ahs traffic", H(CH..SH))
+            write_key = key_schedule
+                .client_authenticated_handshake_traffic_secret(
+                                                &handshake.hash_at_client_recvd_server_hello,
+                                                &*sess.config.key_log,
+                                                &handshake.randoms.client);
+        }
         // Set the client encryption key for handshakes if early data is not used
-        let write_key = key_schedule
-            .client_handshake_traffic_secret(&handshake.hash_at_client_recvd_server_hello,
-                                             &*sess.config.key_log,
-                                             &handshake.randoms.client);
-        sess.common
-            .record_layer
-            .set_message_encrypter(cipher::new_tls13_write(suite, &write_key));
+        sess.common.record_layer
+                    .set_message_encrypter(cipher::new_tls13_write(suite, &write_key));
         Some(write_key)
     } else {
         None
     };
 
-    // simon: SHTS <- HKDF.Expand(HS, "s hs traffic", CH..SH)
-    let read_key = key_schedule
+
+
+    let read_key;
+    if  !is_ssrttkemtls {
+    // SHTS <- HKDF.Expand(HS, "s hs traffic", CH..SH)
+        read_key = key_schedule
         .server_handshake_traffic_secret(&handshake.hash_at_client_recvd_server_hello,
                                          &*sess.config.key_log,
                                         &handshake.randoms.client);
-    
-    
-    // simon: decrypt what the server sends
+    }else{
+        // SAHTS <- HKDF.Expand(MS, "s ahs traffic", H(CH..SH))
+        read_key = key_schedule
+        .server_authenticated_handshake_traffic_secret(&handshake.hash_at_client_recvd_server_hello,
+                                         &*sess.config.key_log,
+                                        &handshake.randoms.client);
+    }
+    // decrypt what the server sends
     sess.common
         .record_layer
         .set_message_decrypter(cipher::new_tls13_read(suite, &read_key));
@@ -358,7 +403,6 @@ fn validate_encrypted_extensions(sess: &mut ClientSessionImpl,
         let msg = "server sent unsolicited encrypted extension".to_string();
         return Err(TLSError::PeerMisbehavedError(msg));
     }
-
     for ext in exts {
         if ALLOWED_PLAINTEXT_EXTS.contains(&ext.get_type()) ||
            DISALLOWED_TLS13_EXTS.contains(&ext.get_type()) {
@@ -367,7 +411,6 @@ fn validate_encrypted_extensions(sess: &mut ClientSessionImpl,
             return Err(TLSError::PeerMisbehavedError(msg));
         }
     }
-
     Ok(())
 }
 
@@ -464,6 +507,9 @@ impl hs::State for ExpectEncryptedExtensions {
         } else if self.is_pdk && self.client_auth.is_none() {
             Ok(self.into_expect_finished_resume(certv, sigv))
         } else if self.is_pdk && self.client_auth.is_some() {
+            if !sess.config.pk_1rtt.is_empty() {
+                return Ok(self.into_expect_finished_resume(certv, sigv))
+            }
             emit_fake_ccs(&mut self.handshake, sess);
             Ok(self.into_expect_ciphertext())
         } else {
@@ -495,7 +541,6 @@ impl ExpectCertificate {
 
     fn emit_ciphertext(&mut self, sess: &mut ClientSessionImpl, certificate: webpki::EndEntityCert) -> Result<(), TLSError> {
         emit_fake_ccs(&mut self.handshake, sess);
-
         self.handshake.print_runtime("ENCAPSULATING TO CERT");
         let (ct, ss) = certificate.encapsulate().map_err(TLSError::WebPKIError)?;
         self.handshake.print_runtime("ENCAPSULATED TO CERT");
@@ -717,7 +762,9 @@ impl hs::State for ExpectCiphertext {
 
         let ciphertext = &msg.0;
         let cert = self.client_auth.cert.take().unwrap();
+
         let eecert = webpki::EndEntityCert::from(&cert[0].0).map_err(TLSError::WebPKIError)?;
+
         self.handshake.print_runtime("DECAPSULATING FROM CCERT");
         let ss= eecert.decapsulate(&self.client_auth.private_key.take().unwrap(), ciphertext).map_err(TLSError::WebPKIError)?;
         self.handshake.print_runtime("DECAPSULATED FROM CCERT");
@@ -1055,21 +1102,26 @@ impl hs::State for ExpectFinished {
             let ks = st.key_schedule.into_traffic_with_client_finished_pending();
             (hash, ks)
         } else {
-            let ks = st.key_schedule.into_kemtlspdk_traffic_with_client_finished_pending(st.client_auth_shared_secret.as_deref());
+            let ks = if sess.config.pk_1rtt.is_empty(){
+                st.key_schedule.into_kemtlspdk_traffic_with_client_finished_pending(st.client_auth_shared_secret.as_deref())
+            } else {
+                st.key_schedule.into_ssrttkemtls_traffic_with_client_finished_pending()
+            };
             (ks.sign_server_finished_kemtlspdk(&handshake_hash), ks)
         };
-
+        
         let fin = constant_time::verify_slices_are_equal(&expect_verify_data, &finished.0)
             .map_err(|_| {
                          sess.common.send_fatal_alert(AlertDescription::DecryptError);
                          TLSError::DecryptError
                     })
             .map(|_| verify::FinishedMessageVerified::assertion())?;
-
+                
         st.handshake.transcript.add_message(&m);
         trace!("AUTHENTICATED SERVER");
 
         let hash_after_handshake = st.handshake.transcript.get_current_hash();
+
 
         /* The EndOfEarlyData message to server is still encrypted with early data keys,
          * but appears in the transcript after the server Finished. */

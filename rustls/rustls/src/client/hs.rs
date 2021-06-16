@@ -334,12 +334,12 @@ fn emit_client_hello_for_retry(sess: &mut ClientSessionImpl,
         }else {
             // 1RTT-KEMTLS
             // HS <- HKDF.Extract(ES,K^t_S)
-            handshake.print_runtime("CREATING Handshake Secret HS");
+            handshake.print_runtime("DERIVING HANDSHAKE SECRET HS");
             let early_secret = Some(KeyScheduleEarly::new(ALL_CIPHERSUITES[0].hkdf_algorithm, ss.as_ref()));
             let sskemtls = semi_static_kemtls_key.unwrap();
             let sskemtlsvec = sskemtls.into_vec();
             handshake_secret = Some(early_secret.unwrap().into_handshake(&sskemtlsvec));
-            handshake.print_runtime("CREATED Handshake Secret HS");
+            handshake.print_runtime("DERIVED HANDSHAKE SECRET HS");
             None
         }
     } else {
@@ -440,7 +440,7 @@ fn emit_client_hello_for_retry(sess: &mut ClientSessionImpl,
         };
     } else if sess.config.client_auth_cert_resolver.has_certs() && is_pdk {
         let issuers = sess.config.known_certificates.iter().map(|c| {
-            let crt = webpki::EndEntityCert::from(&c.0).unwrap();
+            let crt = webpki::EndEntityCert::from(&c.0).unwrap();            
             crt.subject().to_vec()
         }).collect::<Vec<_>>();
         use crate::msgs::enums::SignatureScheme;
@@ -681,9 +681,11 @@ impl State for ExpectServerHello {
             tls13::validate_server_hello(sess, &server_hello)?;
             let key_schedule = tls13::start_handshake_traffic(sess,
                                                               self.early_key_schedule.take(),
+                                                              self.handshake_secret.take(),
                                                               &server_hello,
                                                               &mut self.handshake,
-                                                              &mut self.hello)?;
+                                                              &mut self.hello,
+                                                              &mut self.client_auth)?;
             // XXX: transmit CCS as late as possible. This seems to fix weird TCP side effects
             // with large certificates (Dilithium).
             // tls13::emit_fake_ccs(&mut self.handshake, sess);
