@@ -1,3 +1,4 @@
+use crate::internal::spk_encoder::write_spk;
 use crate::{key_schedule::{KeyScheduleComputesClientFinish, KeyScheduleComputesServerFinish, KeyScheduleTrafficWithServerFinishedPending}, msgs::enums::{ContentType, HandshakeType, ExtensionType, SignatureScheme, SignatureAlgorithm}};
 use crate::msgs::enums::{ProtocolVersion, AlertDescription, NamedGroup};
 use crate::msgs::enums::KeyUpdateRequest;
@@ -22,6 +23,7 @@ use crate::key_schedule::{
     KeyScheduleHandshake,
     KeyScheduleTraffic
 };
+
 use crate::cipher;
 use crate::verify;
 use crate::sign;
@@ -46,6 +48,7 @@ use crate::client::default_group::DEFAULT_GROUP;
 
 use ring::constant_time;
 use webpki;
+
 
 // Extensions we expect in plaintext in the ServerHello.
 static ALLOWED_PLAINTEXT_EXTS: &[ExtensionType] = &[
@@ -1225,6 +1228,15 @@ impl hs::State for ExpectFinished {
                 
         st.handshake.transcript.add_message(&m);
         trace!("AUTHENTICATED SERVER");
+
+        if st.spk.is_some(){
+            // client update pk, epoch
+            // must change this filename hardcoding
+            let spk = st.spk.unwrap();
+            let pk_filename = "../../certificates/1RTT-KEMTLS/kem_ssrttkemtls.pub";
+            let epoch_filename = "../../certificates/1RTT-KEMTLS/client.epoch";
+            write_spk(epoch_filename,pk_filename,spk.public_key,spk.epoch)
+        };
 
         let hash_after_handshake = st.handshake.transcript.get_current_hash();
 

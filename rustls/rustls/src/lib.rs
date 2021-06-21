@@ -250,6 +250,8 @@ mod client;
 mod key;
 mod bs_debug;
 mod keylog;
+mod spk_encoder;
+
 
 /// This module implements the epoch structure needed in 1RTT-KEMTLS
 pub mod epoch;
@@ -266,6 +268,11 @@ pub mod internal {
     /// Low-level TLS message parsing and encoding functions.
     pub mod msgs {
         pub use crate::msgs::*;
+    }
+
+    /// client tool to overwrite existing epoch number and server public key
+    pub mod spk_encoder{
+        pub use crate::spk_encoder::write_spk;
     }
 }
 
