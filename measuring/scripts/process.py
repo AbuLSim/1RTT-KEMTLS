@@ -20,7 +20,9 @@ KEX_RENAMES = {
     "SikeP434Compressed": "Sc",
 }
 
-SIG_RENAMES = dict()
+SIG_RENAMES = {
+    "RainbowICircumzenithal": "Rcz",
+}
 
 #: Renames for the leaf algorithm: combination of signature schemes and KEX
 AUTH_RENAMES = dict()
@@ -193,6 +195,7 @@ def format_results_tex(avgs):
 
         texfile.write(macro("clientdone", avgs["client handshake completed"]))
         texfile.write(macro("serverdone", avgs["server handshake completed"]))
+        texfile.write(macro("serverexplicitauthed", avgs["client authenticated server"]))
         texfile.write(macro("clientgotreply", avgs["client received server reply"]))
 
 
