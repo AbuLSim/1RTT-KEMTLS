@@ -85,7 +85,7 @@ class CustomFormatter(logging.Formatter):
 
 class Experiment(NamedTuple):
     """Represents an experiment"""
-    type: Union[Literal["sign"], Literal["pdk"], Literal["kemtls"], Literal["sign-cached"]]
+    type: Union[Literal["sign"], Literal["pdk"], Literal["kemtls"], Literal["sign-cached"], Literal["pdkss"]]
     kex: str
     leaf: str
     intermediate: Optional[str] = None
@@ -274,19 +274,22 @@ class ServerProcess(multiprocessing.Process):
         self.last_msg = "HANDSHAKE COMPLETED"
         self.servername = "tlsserver"
         self.type = experiment.type
-        self.clientauthopts = []
+        self.extraopts = []
         type = experiment.type
         if type == "sign" or type == "sign-cached":
             self.certname = "signing" + (".chain" if not cached_int else "") + ".crt"
             self.keyname = "signing.key"
-        elif type == "kemtls" or type == "pdk":
+        elif type in ("kemtls", "pdk", "pdkss"):
             self.certname = "kem" + (".chain" if not cached_int else "") + ".crt"
             self.keyname = "kem.key"
         else:
             raise ValueError(f"Invalid Experiment type in {experiment}")
 
+        if type == "pdkss":
+            self.extraopts += ["--1rtt-key", "semistatic-epoch-1.key", "--1rtt-epoch", "semistatic-epoch-1.epoch"]
+
         if experiment.client_auth is not None:
-            self.clientauthopts = ["--require-auth", "--auth", "client-ca.crt"]
+            self.extraopts += ["--require-auth", "--auth", "client-ca.crt"]
 
     def run(self):
         cmd = [
@@ -295,7 +298,7 @@ class ServerProcess(multiprocessing.Process):
             "--certs", self.certname,
             "--key", self.keyname,
             "--port", self.port,
-            *self.clientauthopts,
+            *self.extraopts,
             "http",
         ]
         logger.debug("Server cmd: %s", ' '.join(cmd))
@@ -363,7 +366,7 @@ def run_measurement(output_queue, port, experiment: Experiment, cached_int):
     type = experiment.type
     if type == "sign" or type == "sign-cached":
         caname = "signing" + ("-int" if cached_int else "-ca") + ".crt"
-    elif type == "kemtls" or type == "pdk":
+    elif type in ("kemtls", "pdk", "pdkss"):
         caname = "kem" + ("-int" if cached_int else "-ca") + ".crt"
     else:
         logger.error("Unknown experiment type=%s", type)
@@ -373,8 +376,10 @@ def run_measurement(output_queue, port, experiment: Experiment, cached_int):
     restarts = 0
     allowed_restarts = 2 * MEASUREMENTS_PER_PROCESS / MEASUREMENTS_PER_CLIENT
     cache_args = []
-    if type == "pdk":
+    if type in ("pdk", "pdkss"):
         cache_args = ["--cached-certs", "kem.crt"]
+        if type == "pdkss":
+            cache_args += ["--1rtt-pk", "semistatic-epoch-1.pub", "--1rtt-epoch", "semistatic-epoch-1.epoch"]
     elif type == "sign-cached":
         if not cached_int:
             cache_args = ["--cached-certs", "signing.all.crt"]
