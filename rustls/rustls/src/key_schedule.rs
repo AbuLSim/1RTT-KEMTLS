@@ -274,24 +274,23 @@ impl KeyScheduleHandshake {
         &mut self,
         ss_ephemeral: &[u8],
         ss_client : &[u8],
+        is_eq_epoch : bool,
     ) {
+        if is_eq_epoch {
         // IMS <- HKDF.Extract(dHS,K_e)
-        self.ks.input_secret(ss_ephemeral);
+            self.ks.input_secret(ss_ephemeral);
+        }
         // MS <- HKDF.Extract(dIMS,K_c)
         self.ks.input_secret(ss_client);
         self.authenticated = true;
-
     }
 
     pub fn into_kemtlspdk_traffic_with_client_finished_pending(
         mut self, client_shared_secret: Option<&[u8]>
     ) -> KeyScheduleTrafficWithClientFinishedPending {
         if let Some(ss) = client_shared_secret {
-            println!("HEREEE");
             self.ks.input_secret(ss);
         } else {
-            println!("THERE");
-
             self.ks.input_empty();
         }
         KeyScheduleTrafficWithClientFinishedPending {
@@ -590,7 +589,7 @@ impl KeySchedule {
         T: for<'a> From<hkdf::Okm<'a, L>>,
         L: hkdf::KeyType,
     {
-        println!("kind: {:?}",kind);
+        println!("SecretKind: {:?}",kind);
         hkdf_expand(&self.current, key_type, kind.to_bytes(), hs_hash)
     }
 
@@ -602,7 +601,6 @@ impl KeySchedule {
         client_random: &[u8; 32],
     ) -> hkdf::Prk {
         let log_label = kind.log_label().expect("not a loggable secret");
-        println!("{:?}",log_label);
         if key_log.will_log(log_label) {
             let secret = self
                 .derive::<PayloadU8, _>(PayloadU8Len(self.algorithm.len()), kind, hs_hash)
@@ -707,8 +705,6 @@ where
     T: for<'a> From<hkdf::Okm<'a, L>>,
     L: hkdf::KeyType,
 {
-    // simon to be erased println
-    println!("{:?}",String::from_utf8_lossy(label));
     hkdf_expand_info(secret, key_type, label, context, |okm| okm.into())
 }
 

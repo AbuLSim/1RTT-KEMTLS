@@ -126,7 +126,9 @@ enum_builder! {
         KeyUpdate => 0x18,
         MessageHash => 0xfe,
         ServerKemCiphertext => 0x20,
-        ClientKemCiphertext => 0x21
+        ClientKemCiphertext => 0x21,
+        // 1RTT-KEMTLS
+        ServerPublicKey => 0x22,
     }
 }
 

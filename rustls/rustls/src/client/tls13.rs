@@ -7,6 +7,7 @@ use crate::msgs::handshake::{HandshakePayload, HandshakeMessagePayload};
 use crate::msgs::handshake::{SessionID, ServerHelloPayload, HasServerExtensions};
 use crate::msgs::handshake::{ClientExtension, HelloRetryRequest, KeyShareEntry};
 use crate::msgs::handshake::EncryptedExtensions;
+use crate::msgs::handshake::ServerPublicKey;
 use crate::msgs::handshake::{CertificatePayloadTLS13, CertificateEntry};
 use crate::msgs::handshake::{PresharedKeyIdentity, PresharedKeyOffer};
 use crate::msgs::handshake::DigitallySignedStruct;
@@ -235,7 +236,7 @@ pub fn start_handshake_traffic(sess: &mut ClientSessionImpl,
 
             debug!("Using semi static 1RTT-KEMTLS");
             let mut master_secret = handshake_secret.unwrap();
-            master_secret.into_ssrttkemtls_master_secret(&shared,&proactive_key_share);
+            master_secret.into_ssrttkemtls_master_secret(&shared,&proactive_key_share,true);
             master_secret
         }else{
             debug!("Using PDK");
@@ -260,7 +261,6 @@ pub fn start_handshake_traffic(sess: &mut ClientSessionImpl,
 
     handshake.hash_at_client_recvd_server_hello =
         handshake.transcript.get_current_hash();
-    
     let _maybe_write_key = if !sess.early_data.is_enabled() {
         let write_key;
         if  !is_ssrttkemtls {
@@ -294,19 +294,21 @@ pub fn start_handshake_traffic(sess: &mut ClientSessionImpl,
         .server_handshake_traffic_secret(&handshake.hash_at_client_recvd_server_hello,
                                          &*sess.config.key_log,
                                         &handshake.randoms.client);
+        handshake.print_runtime("DERIVED HS");
+        
     }else{
         // SAHTS <- HKDF.Expand(MS, "s ahs traffic", H(CH..SH))
         read_key = key_schedule
         .server_authenticated_handshake_traffic_secret(&handshake.hash_at_client_recvd_server_hello,
                                          &*sess.config.key_log,
                                         &handshake.randoms.client);
+        handshake.print_runtime("DERIVED MS"); 
     }
     // decrypt what the server sends
     sess.common
         .record_layer
         .set_message_decrypter(cipher::new_tls13_read(suite, &read_key));
     
-    handshake.print_runtime("DERIVED HS");
 
     #[cfg(feature = "quic")] {
         let write_key = if sess.early_data.is_enabled() {
@@ -392,6 +394,7 @@ pub fn emit_fake_ccs(hs: &mut HandshakeDetails, sess: &mut ClientSessionImpl) {
 fn validate_encrypted_extensions(sess: &mut ClientSessionImpl,
                                  hello: &ClientHelloDetails,
                                  exts: &EncryptedExtensions) -> Result<(), TLSError> {
+
     if exts.has_duplicate_extension() {
         sess.common.send_fatal_alert(AlertDescription::DecodeError);
         return Err(TLSError::PeerMisbehavedError("server sent duplicate encrypted extensions"
@@ -414,13 +417,67 @@ fn validate_encrypted_extensions(sess: &mut ClientSessionImpl,
     Ok(())
 }
 
+
+pub struct ExpectServerPublicKey{
+    pub handshake: HandshakeDetails,
+    pub key_schedule: KeyScheduleHandshake,
+    pub server_cert: ServerCertDetails,
+    pub hello: ClientHelloDetails,
+    pub client_auth: Option<ClientAuthDetails>,
+    pub is_eq_epoch: bool,
+}
+
+impl ExpectServerPublicKey {
+    fn into_expect_tls13_encrypted_extensions(self, spk: &ServerPublicKey, is_eq_epoch:bool) -> hs::NextState {
+        Box::new(ExpectEncryptedExtensions {
+            handshake: self.handshake,
+            key_schedule: self.key_schedule,
+            server_cert: self.server_cert,
+            hello: self.hello,
+            is_pdk: true,
+            client_auth: self.client_auth,
+            spk: Some(spk.clone()),
+            is_eq_epoch,
+        })
+    }
+}
+
+impl hs::State for ExpectServerPublicKey {
+    fn handle(self: Box<Self>, sess: &mut ClientSessionImpl, m: Message) -> hs::NextStateOrError {
+        match require_handshake_msg!(m, HandshakeType::ServerPublicKey, HandshakePayload::ServerPublicKey){
+            // if not SPK then proceed with expecting Encrypted Extensions
+            Err(_) => {
+                let ee =  Box::new(ExpectEncryptedExtensions {
+                    handshake: self.handshake,
+                    key_schedule: self.key_schedule,
+                    server_cert: self.server_cert,
+                    hello: self.hello,
+                    is_pdk: true,
+                    client_auth: self.client_auth,
+                    spk: None,
+                    is_eq_epoch: true,
+                }); 
+                ExpectEncryptedExtensions::handle(ee,sess,m)
+            },
+            // if SPK was sent then treat the message
+            Ok(spk) => {
+                self.handshake.print_runtime("RECEIVED SPK");
+                Ok(self.into_expect_tls13_encrypted_extensions(spk,false))
+            },
+        }
+        
+    }
+}
+
 pub struct ExpectEncryptedExtensions {
     pub handshake: HandshakeDetails,
     pub key_schedule: KeyScheduleHandshake,
     pub server_cert: ServerCertDetails,
     pub hello: ClientHelloDetails,
     pub is_pdk: bool,
-    pub client_auth: Option<ClientAuthDetails>
+    pub client_auth: Option<ClientAuthDetails>,
+    pub spk: Option<ServerPublicKey>,
+    pub is_eq_epoch: bool,
 }
 
 impl ExpectEncryptedExtensions {
@@ -435,6 +492,7 @@ impl ExpectEncryptedExtensions {
             sig_verified: sigv,
             is_pdk: self.is_pdk,
             client_auth_shared_secret: None,
+            spk: self.spk,
         })
     }
 
@@ -452,6 +510,7 @@ impl ExpectEncryptedExtensions {
             client_auth: self.client_auth.unwrap(),
             key_schedule: self.key_schedule,
             is_pdk: true,
+            spk: self.spk,
         })
     }
 }
@@ -460,6 +519,7 @@ impl hs::State for ExpectEncryptedExtensions {
     fn handle(mut self: Box<Self>, sess: &mut ClientSessionImpl, m: Message) -> hs::NextStateOrError {
         let exts = require_handshake_msg!(m, HandshakeType::EncryptedExtensions, HandshakePayload::EncryptedExtensions)?;
         debug!("TLS1.3 encrypted extensions: {:?}", exts);
+        
         self.handshake.transcript.add_message(&m);
 
         validate_encrypted_extensions(sess, &self.hello, &exts)?;
@@ -471,6 +531,14 @@ impl hs::State for ExpectEncryptedExtensions {
                 sess.common.quic.params = Some(params);
             }
         }
+
+        // if 1RTT-KEMTLS with non-equal epochs, then send certificate
+        if  sess.config.epoch_1rtt.is_some() && self.is_eq_epoch == false{
+            let client_auth = self.client_auth.as_mut().unwrap();
+            emit_certificate_tls13(&mut self.handshake, client_auth, sess);
+            emit_fake_ccs(&mut self.handshake, sess);
+            return Ok(self.into_expect_ciphertext())
+        };
 
         let certv = verify::ServerCertVerified::assertion();
         let sigv =  verify::HandshakeSignatureValid::assertion();
@@ -521,6 +589,8 @@ impl hs::State for ExpectEncryptedExtensions {
         }
     }
 }
+
+
 
 struct ExpectCertificate {
     handshake: HandshakeDetails,
@@ -582,6 +652,7 @@ impl ExpectCertificate {
             key_schedule: self.key_schedule,
             client_auth: self.client_auth.unwrap(),
             is_pdk: false,
+            spk: None,
         })
     }
 
@@ -716,6 +787,7 @@ struct ExpectCiphertext {
     key_schedule: KeyScheduleHandshake,
     client_auth: ClientAuthDetails,
     is_pdk: bool,
+    spk: Option<ServerPublicKey>,
 }
 
 impl ExpectCiphertext {
@@ -729,6 +801,7 @@ impl ExpectCiphertext {
                 is_pdk: true,
                 client_auth: Some(self.client_auth),
                 client_auth_shared_secret: Some(shared_secret.to_vec()),
+                spk: self.spk,
             })
         } else {
             let mut ks = self.key_schedule.into_traffic_with_server_finished_pending(Some(shared_secret));
@@ -766,10 +839,35 @@ impl hs::State for ExpectCiphertext {
         let eecert = webpki::EndEntityCert::from(&cert[0].0).map_err(TLSError::WebPKIError)?;
 
         self.handshake.print_runtime("DECAPSULATING FROM CCERT");
-        let ss= eecert.decapsulate(&self.client_auth.private_key.take().unwrap(), ciphertext).map_err(TLSError::WebPKIError)?;
+        let ss = eecert.decapsulate(&self.client_auth.private_key.take().unwrap(), ciphertext).map_err(TLSError::WebPKIError)?;
         self.handshake.print_runtime("DECAPSULATED FROM CCERT");
 
         self.handshake.transcript.add_message(&m);
+
+        // if we are in 1RTT-KEMTLS with non equal epoch, e.g. two round trip 1RTT-KEMTLS
+        if self.spk.is_some(){
+            let suite = sess.common.get_suite_assert();
+
+            self.key_schedule.into_ssrttkemtls_master_secret(&ss,&ss,false);
+            self.handshake.hash_at_client_recvd_server_hello = self.handshake.transcript.get_current_hash();
+            let write_key =  self.key_schedule
+                            .client_authenticated_handshake_traffic_secret(
+                                                        &self.handshake.hash_at_client_recvd_server_hello,
+                                                        &*sess.config.key_log,
+                                                        &self.handshake.randoms.client);
+             sess.common.record_layer
+                    .set_message_encrypter(cipher::new_tls13_write(suite, &write_key));
+
+            let  read_key = self.key_schedule
+                            .server_authenticated_handshake_traffic_secret(
+                                            &self.handshake.hash_at_client_recvd_server_hello,
+                                            &*sess.config.key_log,
+                                            &self.handshake.randoms.client);
+             sess.common.record_layer
+                .set_message_decrypter(cipher::new_tls13_read(suite, &read_key));
+            
+                self.handshake.print_runtime("DERIVED MS"); 
+        };
         Ok(self.into_expect_finished(sess, &ss))
     }
 }
@@ -794,6 +892,7 @@ impl ExpectCertificateVerify {
             sig_verified: sigv,
             is_pdk: false,
             client_auth_shared_secret: None,
+            spk: None,
         })
     }
 }
@@ -946,7 +1045,8 @@ pub fn emit_certificate_tls13(handshake: &mut HandshakeDetails,
     let context = client_auth.auth_context
         .take()
         .unwrap_or_else(Vec::new);
-
+    
+    
     let mut cert_payload = CertificatePayloadTLS13 {
         context: PayloadU8::new(context),
         entries: Vec::new(),
@@ -967,7 +1067,10 @@ pub fn emit_certificate_tls13(handshake: &mut HandshakeDetails,
         }),
     };
     trace!("Sending certificate message {:?}", &m);
-    handshake.transcript.add_message(&m);
+    // certificate must be added to transcript only when it's not 1RTT-KEMTLS
+    if sess.config.epoch_1rtt.is_none(){
+        handshake.transcript.add_message(&m);
+    }
     handshake.print_runtime("EMIT CERT");
     sess.common.send_msg(m, true);
 
@@ -1057,7 +1160,8 @@ struct ExpectFinished {
     cert_verified: verify::ServerCertVerified,
     sig_verified: verify::HandshakeSignatureValid,
     is_pdk: bool,
-    client_auth_shared_secret: Option<Vec<u8>>
+    client_auth_shared_secret: Option<Vec<u8>>,
+    spk: Option<ServerPublicKey>
 }
 
 impl ExpectFinished {
@@ -1080,7 +1184,9 @@ impl ExpectFinished {
 impl hs::State for ExpectFinished {
     fn handle(self: Box<Self>, sess: &mut ClientSessionImpl, m: Message) -> hs::NextStateOrError {
         let mut st = *self;
+
         let finished = require_handshake_msg!(m, HandshakeType::Finished, HandshakePayload::Finished)?;
+
         st.handshake.print_runtime("RECEIVED FINISHED");
 
         let suite = sess.common.get_suite_assert();

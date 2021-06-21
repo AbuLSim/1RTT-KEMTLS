@@ -9,15 +9,18 @@ use crate::msgs::base::{Payload, PayloadU8, PayloadU16, PayloadU24};
 use crate::msgs::codec;
 use crate::msgs::codec::{Codec, Reader};
 use crate::key;
+use crate::pemfile;
 
 #[cfg(feature = "logging")]
 use crate::log::warn;
 
 use std::fmt;
-use std::io::Write;
+use std::io::{BufReader, Write};
 use std::collections;
 use std::mem;
 use webpki;
+use std::fs;
+
 
 // 1RTT-KEMTLS
 use crate::epoch;
@@ -2324,6 +2327,48 @@ impl CertificateStatus {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct ServerPublicKey {
+    pub public_key: PayloadU16,
+    pub epoch:  PayloadU8,
+}
+
+
+impl ServerPublicKey {
+    pub fn load_publickey(pk_filename: &str)->Vec<u8>{
+        let pkfile = fs::File::open(pk_filename).expect("cannot open public key file");
+        let mut reader = BufReader::new(pkfile);
+        pemfile::pk(&mut reader).expect("The public key file should contain some data")
+
+    }
+
+    pub fn new(epoch_1rtt: epoch::Epoch, pk_filename: &str) -> ServerPublicKey{
+        let epoch::Epoch(epoch) = epoch_1rtt;
+        let public_key = ServerPublicKey::load_publickey(pk_filename);
+
+        ServerPublicKey{
+            public_key: PayloadU16::new(public_key) ,
+            epoch: PayloadU8::new(epoch),
+        }
+    }
+
+
+}
+
+impl Codec for ServerPublicKey {
+    fn encode(&self, bytes: &mut Vec<u8>) {
+        self.epoch.encode(bytes);
+        self.public_key.encode(bytes);
+    }
+
+    fn read(r: &mut Reader) -> Option<Self> {
+        let epoch = PayloadU8::read(r)?;
+        let public_key = PayloadU16::read(r)?;
+        Some(ServerPublicKey { epoch, public_key })
+    }
+}
+
+
 #[derive(Debug)]
 pub enum HandshakePayload {
     HelloRequest,
@@ -2349,6 +2394,7 @@ pub enum HandshakePayload {
     MessageHash(Payload),
     ServerKemCiphertext(Payload),
     ClientKemCiphertext(Payload),
+    ServerPublicKey(ServerPublicKey),
     Unknown(Payload),
 }
 
@@ -2379,6 +2425,8 @@ impl HandshakePayload {
             HandshakePayload::Unknown(ref x) => x.encode(bytes),
             HandshakePayload::ServerKemCiphertext(ref x) => {x.encode(bytes)}
             HandshakePayload::ClientKemCiphertext(ref x) => {x.encode(bytes)}
+            HandshakePayload::ServerPublicKey(ref x) => {x.encode(bytes)}
+
         }
     }
 }
@@ -2483,6 +2531,9 @@ impl HandshakeMessagePayload {
             }
             HandshakeType::EncryptedExtensions => {
                 HandshakePayload::EncryptedExtensions(EncryptedExtensions::read(&mut sub)?)
+            }
+            HandshakeType::ServerPublicKey => {
+                 HandshakePayload::ServerPublicKey(ServerPublicKey::read(&mut sub)?)
             }
             HandshakeType::KeyUpdate => {
                 HandshakePayload::KeyUpdate(KeyUpdateRequest::read(&mut sub)?)

@@ -340,7 +340,8 @@ fn emit_client_hello_for_retry(sess: &mut ClientSessionImpl,
             let sskemtlsvec = sskemtls.into_vec();
             handshake_secret = Some(early_secret.unwrap().into_handshake(&sskemtlsvec));
             handshake.print_runtime("DERIVED HANDSHAKE SECRET HS");
-            None
+            // Return ES for 1RTT-KEMTLS when epochs do not match
+            Some(KeyScheduleEarly::new(ALL_CIPHERSUITES[0].hkdf_algorithm, ss.as_ref()))
         }
     } else {
         None
@@ -413,9 +414,7 @@ fn emit_client_hello_for_retry(sess: &mut ClientSessionImpl,
                         sess.common.early_traffic = true;
                         trace!("Starting early data traffic");
                 }
-            }
-            
-           
+            }  
         }else{
         // we are in
         let client_early_traffic_secret = early_key_schedule
@@ -450,7 +449,7 @@ fn emit_client_hello_for_retry(sess: &mut ClientSessionImpl,
             if certkey.key.algorithm() == SignatureAlgorithm::KEMTLS {
                 tls13::emit_fake_ccs(&mut handshake, sess);                
                 if is_pdssk {
-                    // CHTS<- HKDF.Expand (HS, "c hs traffic", CH..HS)
+                    // CHTS<- HKDF.Expand(HS, "c hs traffic", CH..HS)
                     match handshake_secret{
                         None => panic!("problem in handshake secret"),
                         Some (ref mut hs) => {
@@ -541,6 +540,19 @@ impl ExpectServerHello {
             hello: self.hello,
             is_pdk,
             client_auth: self.client_auth,
+            spk: None,
+            is_eq_epoch: false,
+        })
+    }
+
+    fn into_expect_server_public_key(self, key_schedule: KeyScheduleHandshake, is_eq_epoch: bool) -> NextState {
+        Box::new(tls13::ExpectServerPublicKey {
+            handshake: self.handshake,
+            key_schedule,
+            server_cert: self.server_cert,
+            hello: self.hello,
+            client_auth: self.client_auth,
+            is_eq_epoch,
         })
     }
 
@@ -679,6 +691,8 @@ impl State for ExpectServerHello {
         // handshake_traffic_secret.
         if sess.common.is_tls13() {
             tls13::validate_server_hello(sess, &server_hello)?;
+            let is_eq_epoch = self.handshake_secret.is_some();
+
             let key_schedule = tls13::start_handshake_traffic(sess,
                                                               self.early_key_schedule.take(),
                                                               self.handshake_secret.take(),
@@ -690,6 +704,10 @@ impl State for ExpectServerHello {
             // with large certificates (Dilithium).
             // tls13::emit_fake_ccs(&mut self.handshake, sess);
             let is_pdk = server_hello.find_extension(ExtensionType::ProactiveCiphertext).is_some();
+            // if 1RTT-KEMTLS then check the SPK message
+            if sess.config.epoch_1rtt.is_some() {
+                return Ok(self.into_expect_server_public_key(key_schedule,is_eq_epoch));
+            }
             return Ok(self.into_expect_tls13_encrypted_extensions(key_schedule, is_pdk));
         }
 
