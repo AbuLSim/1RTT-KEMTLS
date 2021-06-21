@@ -355,6 +355,15 @@ def write_tbs_certificate(
     encoder.leave()  # Leave TBSCertificate SEQUENCE
 
 
+def generate_epoch_keys(pk_algorithm, epoch: bytes, filename):
+    filename = filename.lower()
+    set_up_algorithm(pk_algorithm, "kem")
+    (pk, sk) = get_keys(type, pk_algorithm)
+    write_pem(f"{filename}.pub", b"PUBLIC KEY", public_key_der(pk_algorithm, pk))
+    write_pem(f"{filename}.key", b"PRIVATE KEY", sk)
+    write_pem(f"{filename}.epoch", b"EPOCH", epoch)
+
+
 def generate(
     pk_algorithm,
     sig_algorithm,
@@ -548,6 +557,10 @@ if __name__ == "__main__":
             type="kem",
             issuer="SimonCert Int CA",
         )
+
+        print(f"Generating epoch key keys for {leaf_auth_algorithm}")
+        generate_epoch_keys(leaf_auth_algorithm, b"\x01", "semistatic-epoch-1")
+        generate_epoch_keys(leaf_auth_algorithm, b"\x02", "semistatic-epoch-2")
 
         with open(f"kem.chain.crt", "wb") as file_:
             with open(f"kem.crt", "rb") as r:
