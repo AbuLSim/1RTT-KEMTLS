@@ -16,7 +16,7 @@ Then go to:
 	cd rustls/rustls-mio
 
 And build/run the implementation by typing:
-	cargo run --example tlsserver -- --certs ../../certificates/1RTT-KEMTLS/kem.crt --key ../../certificates/1RTT-KEMTLS/kem.key --1rtt-key ../../certificates/1RTT-KEMTLS/kem_ssrttkemtls.key --port 10001 --require-auth --1rtt-epoch ../../certificates/1RTT-KEMTLS/server.epoch  --auth ../../certificates/1RTT-KEMTLS/client-ca.crt http
+	cargo run --example tlsserver -- --certs ../../certificates/1RTT-KEMTLS/kem.crt --key ../../certificates/1RTT-KEMTLS/kem.key --1rtt-key ../../certificates/1RTT-KEMTLS/kem_ssrttkemtls.key --port 10001 --require-auth --1rtt-pk ../../certificates/1RTT-KEMTLS/kem_ssrttkemtls.pub --1rtt-epoch ../../certificates/1RTT-KEMTLS/server.epoch  --auth ../../certificates/1RTT-KEMTLS/client-ca.crt http
 
 The previous command connects starts the server server on port 10001 with http mode, and requires the client to authenticate itself
 and to use the semi-static one round trip KEMTLS mode with some pre-distributed server certificate.
