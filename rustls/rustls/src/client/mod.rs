@@ -1,9 +1,10 @@
+use crate::client::handy::NeverResolves1RTTPublicKey;
 use crate::msgs::enums::CipherSuite;
 use crate::msgs::enums::{AlertDescription, HandshakeType};
 use crate::session::{Session, SessionCommon, MiddleboxCCS};
 use crate::keylog::{KeyLog, NoKeyLog};
 use crate::suites::{SupportedCipherSuite, ALL_CIPHERSUITES};
-use crate::msgs::handshake::CertificatePayload;
+use crate::msgs::handshake::{CertificatePayload, ServerPublicKey};
 use crate::msgs::enums::SignatureScheme;
 use crate::msgs::enums::{ContentType, ProtocolVersion};
 use crate::msgs::handshake::ClientExtension;
@@ -33,7 +34,9 @@ pub mod handy;
 mod default_group;
 
 /// 1RTT-KEMTLS
-use crate::epoch;
+use crate::epoch::Epoch;
+
+use self::handy::AlwaysResolves1RTTPublicKey;
 /// A trait for the ability to store client session data.
 /// The keys and values are opaque.
 ///
@@ -76,6 +79,15 @@ pub trait ResolvesClientCert : Send + Sync {
 
     /// Return true if any certificates at all are available.
     fn has_certs(&self) -> bool;
+}
+
+/// A trait for the ability to choose an epoch key for the purposes of ssrtt/pdk-ss kemtls
+pub trait ResolvesEpochPublicKey: Send + Sync {
+    /// get the public key
+    fn get(&self, hostname: webpki::DNSNameRef) -> Option<(Epoch, Vec<u8>)>;
+
+    // Update the stored public keys.
+    fn update(&self, spk: ServerPublicKey);
 }
 
 /// Common configuration for (typically) all connections made by
@@ -142,12 +154,8 @@ pub struct ClientConfig {
     /// RFC 7924
     pub known_certificates: Vec<key::Certificate>,
 
-
-    /// 1RTT-KEMTLS server temporary public key
-    pub pk_1rtt: Vec<u8>,
-    
-    /// 1RTT-KEMTLS client epoch number
-    pub epoch_1rtt: Option<epoch::Epoch>,
+    /// 1RTT-KEMTLS server temporary public key resolver
+    pub ssrtt_resolver: Arc<dyn ResolvesEpochPublicKey>,
 }
 
 impl Default for ClientConfig {
@@ -186,8 +194,7 @@ impl ClientConfig {
             enable_early_data: false,
             known_certificates: Vec::new(),
             // 1RTT-KEMTLS
-            epoch_1rtt: None,
-            pk_1rtt: Vec::new(),
+            ssrtt_resolver: Arc::new(NeverResolves1RTTPublicKey),
         }
     }
 
@@ -249,11 +256,8 @@ impl ClientConfig {
     }
 
     /// 1RTT-KEMTLS setting public key and epoch
-    pub fn set_epoch_pk(&mut self, pk_1rtt: Vec<u8>, epoch_1rtt: epoch::Epoch) {
-        if !pk_1rtt.is_empty(){
-            self.pk_1rtt = pk_1rtt;
-            self.epoch_1rtt = Some(epoch_1rtt);
-        };
+    pub fn set_epoch_pk(&mut self, pk_1rtt: Vec<u8>, epoch_1rtt: Epoch) {
+        self.ssrtt_resolver = Arc::new(AlwaysResolves1RTTPublicKey::new(epoch_1rtt, pk_1rtt))
     }
 
     /// Access configuration options whose use is dangerous and requires
@@ -409,6 +413,7 @@ pub struct ClientSessionImpl {
     pub server_cert_chain: CertificatePayload,
     pub early_data: EarlyData,
     pub resumption_ciphersuite: Option<&'static SupportedCipherSuite>,
+    pub ssrtt_data: Option<(Epoch, Vec<u8>)>,
 }
 
 impl fmt::Debug for ClientSessionImpl {
@@ -428,10 +433,12 @@ impl ClientSessionImpl {
             server_cert_chain: Vec::new(),
             early_data: EarlyData::new(),
             resumption_ciphersuite: None,
+            ssrtt_data: None,
         }
     }
 
     pub fn start_handshake(&mut self, hostname: webpki::DNSName, extra_exts: Vec<ClientExtension>) {
+        self.ssrtt_data = self.config.ssrtt_resolver.get(hostname.as_ref());
         self.state = Some(hs::start_handshake(self, hostname, extra_exts));
     }
 

@@ -233,7 +233,7 @@ impl ExtensionProcessing {
                 }
             }
 
-            // don't send back this extension if we're doing KEMTLS-PDK
+            // don't send back this extension if we're not doing KEMTLS-PDK
             if !doing_pdk {
                 if let Some(cached_info) = hello.cached_information() {
                     let cert_hashes = server_key.cert.iter().map(|crt| crt.hash()).collect::<Vec<Vec<u8>>>();

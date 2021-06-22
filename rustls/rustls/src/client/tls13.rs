@@ -1,4 +1,3 @@
-use crate::internal::spk_encoder::write_spk;
 use crate::{key_schedule::{KeyScheduleComputesClientFinish, KeyScheduleComputesServerFinish, KeyScheduleTrafficWithServerFinishedPending}, msgs::enums::{ContentType, HandshakeType, ExtensionType, SignatureScheme, SignatureAlgorithm}};
 use crate::msgs::enums::{ProtocolVersion, AlertDescription, NamedGroup};
 use crate::msgs::enums::KeyUpdateRequest;
@@ -535,16 +534,17 @@ impl hs::State for ExpectEncryptedExtensions {
             }
         }
 
-        // if 1RTT-KEMTLS with non-equal epochs, then send certificate
-        if  sess.config.epoch_1rtt.is_some() && self.is_eq_epoch == false{
-            let client_auth = self.client_auth.as_mut().unwrap();
-            emit_certificate_tls13(&mut self.handshake, client_auth, sess);
-            emit_fake_ccs(&mut self.handshake, sess);
-            return Ok(self.into_expect_ciphertext())
-        };
-
         let certv = verify::ServerCertVerified::assertion();
         let sigv =  verify::HandshakeSignatureValid::assertion();
+
+        // if 1RTT-KEMTLS with non-equal epochs, then send certificate
+        if  sess.ssrtt_data.is_some() && self.is_eq_epoch == false{
+            let client_auth = self.client_auth.as_mut().unwrap();
+            emit_certificate_tls13(&mut self.handshake, client_auth, sess);
+            return Ok(self.into_expect_ciphertext())
+        } else if sess.ssrtt_data.is_some() {
+            return Ok(self.into_expect_finished_resume(certv, sigv))
+        }
 
         if let Some(resuming_session) = &self.handshake.resuming_session {
             let was_early_traffic = sess.common.early_traffic;
@@ -578,10 +578,6 @@ impl hs::State for ExpectEncryptedExtensions {
         } else if self.is_pdk && self.client_auth.is_none() {
             Ok(self.into_expect_finished_resume(certv, sigv))
         } else if self.is_pdk && self.client_auth.is_some() {
-            if !sess.config.pk_1rtt.is_empty() {
-                return Ok(self.into_expect_finished_resume(certv, sigv))
-            }
-            emit_fake_ccs(&mut self.handshake, sess);
             Ok(self.into_expect_ciphertext())
         } else {
             if exts.early_data_extension_offered() {
@@ -1071,7 +1067,7 @@ pub fn emit_certificate_tls13(handshake: &mut HandshakeDetails,
     };
     trace!("Sending certificate message {:?}", &m);
     // certificate must be added to transcript only when it's not 1RTT-KEMTLS
-    if sess.config.epoch_1rtt.is_none(){
+    if sess.ssrtt_data.is_none(){
         handshake.transcript.add_message(&m);
     }
     handshake.print_runtime("EMIT CERT");
@@ -1211,7 +1207,7 @@ impl hs::State for ExpectFinished {
             let ks = st.key_schedule.into_traffic_with_client_finished_pending();
             (hash, ks)
         } else {
-            let ks = if sess.config.pk_1rtt.is_empty(){
+            let ks = if sess.ssrtt_data.is_none(){
                 st.key_schedule.into_kemtlspdk_traffic_with_client_finished_pending(st.client_auth_shared_secret.as_deref())
             } else {
                 st.key_schedule.into_ssrttkemtls_traffic_with_client_finished_pending()
@@ -1229,13 +1225,10 @@ impl hs::State for ExpectFinished {
         st.handshake.transcript.add_message(&m);
         trace!("AUTHENTICATED SERVER");
 
-        if st.spk.is_some(){
+        if let Some(spk) = st.spk {
             // client update pk, epoch
             // must change this filename hardcoding
-            let spk = st.spk.unwrap();
-            let pk_filename = "../../certificates/1RTT-KEMTLS/kem_ssrttkemtls.pub";
-            let epoch_filename = "../../certificates/1RTT-KEMTLS/client.epoch";
-            write_spk(epoch_filename,pk_filename,spk.public_key,spk.epoch)
+            sess.config.ssrtt_resolver.update(spk);
         };
 
         let hash_after_handshake = st.handshake.transcript.get_current_hash();

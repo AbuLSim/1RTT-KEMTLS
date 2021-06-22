@@ -235,9 +235,9 @@ fn emit_client_hello_for_retry(sess: &mut ClientSessionImpl,
         // 1RTT-KEMTLS
         // the folowing two conditions are enough for the prototype; for real deployement one needs to make sure
         // that the client uses KEM algorithms i.e. leaf certificate signature is a KEM  
-        if sess.config.client_auth_cert_resolver.has_certs() && sess.config.epoch_1rtt.is_some(){
-            if let Some(epoch) = sess.config.epoch_1rtt.clone() {
-                if let Some((extkemtls, sskemtls)) = ClientExtension::encapsulate_1rtt_pk(&sess.config.pk_1rtt,epoch) {                
+        if sess.config.client_auth_cert_resolver.has_certs() && sess.ssrtt_data.is_some(){
+            if let Some((epoch, key)) = sess.ssrtt_data.clone() {
+                if let Some((extkemtls, sskemtls)) = ClientExtension::encapsulate_1rtt_pk(&key, epoch) {                
                     exts.push(extkemtls);
                     semi_static_kemtls_key = Some(sskemtls);
                     handshake.print_runtime("CREATED PDK 1RTT-KEMTLS ENCAPSULATION")
@@ -415,7 +415,7 @@ fn emit_client_hello_for_retry(sess: &mut ClientSessionImpl,
                         trace!("Starting early data traffic");
                 }
             }  
-        }else{
+        } else{
         // we are in
         let client_early_traffic_secret = early_key_schedule
             .as_ref()
@@ -708,7 +708,7 @@ impl State for ExpectServerHello {
             // tls13::emit_fake_ccs(&mut self.handshake, sess);
             let is_pdk = server_hello.find_extension(ExtensionType::ProactiveCiphertext).is_some();
             // if 1RTT-KEMTLS then check the SPK message
-            if sess.config.epoch_1rtt.is_some() {
+            if sess.ssrtt_data.is_some() {
                 return Ok(self.into_expect_server_public_key(key_schedule,is_eq_epoch));
             }
             return Ok(self.into_expect_tls13_encrypted_extensions(key_schedule, is_pdk));

@@ -745,7 +745,7 @@ impl CompleteClientHelloHandling {
         
         // if 1RTT-KEMTLS epochs are equals or if we are not doing 1RTT-KEMTLS
         // Then proceed with KeyScheduling
-        if !(Some(false)== is_eq_epoch){
+        if !(Some(false) == is_eq_epoch){
             if let Some(ref ks) = maybe_key_schedule {
                 // Continue the Key Scheduling depending on whether it is the 
                 // semi-static 1RTT-KEMTLS or the normal KEMTLS 
@@ -915,6 +915,7 @@ impl CompleteClientHelloHandling {
         if Some(false) == is_eq_epoch{
             // Emit {SPK:= ServerPublicKey}
             let pk_filename = "../../certificates/1RTT-KEMTLS/new_kem_ssrttkemtls.pub";
+            self.emit_fake_ccs(sess);
             self.emit_server_public_key(sess, pk_filename)?;
             self.emit_encrypted_extensions(sess, &mut server_key, client_hello, resumedata.as_ref(), doing_pdk)?;
             sess.config.verifier.client_auth_mandatory(sess.get_sni())
@@ -937,7 +938,7 @@ impl CompleteClientHelloHandling {
                                                     ))
         };
 
-        if !is_ssrttkemtls{
+        if !is_ssrttkemtls {
             // if we are not doing 1RTT-KEMTLS with equal epochs
             // then send encrypted extensions now
             self.emit_encrypted_extensions(sess, &mut server_key, client_hello, resumedata.as_ref(), doing_pdk)?;
@@ -985,6 +986,13 @@ impl CompleteClientHelloHandling {
                 // emit ciphertext XXX copied from ExpectCertificate.emit_ciphertext
                 let certificate = webpki::EndEntityCert::from(&cert.cert_chain[0].0)
                     .map_err(TLSError::WebPKIError)?;
+
+                sess.config.get_verifier()
+                    .verify_client_cert(&cert.cert_chain, sess.get_sni())
+                    .or_else(|err| {
+                             hs::incompatible(sess, "certificate invalid");
+                             Err(err)
+                    })?;
 
                 self.handshake.print_runtime("PDK ENCAPSULATING TO CCERT");
                 let (ct, ss) = certificate.encapsulate().map_err(|_| TLSError::DecryptError)?;

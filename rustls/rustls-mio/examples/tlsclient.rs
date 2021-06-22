@@ -586,7 +586,7 @@ fn make_config(args: &Args) -> Arc<rustls::ClientConfig> {
 
     // 1RTT-KEMTLS
     if (args.flag_1rtt_epoch.is_some() ||  args.flag_1rtt_pk.is_some()) 
-                && args.flag_auth_key.is_some() && args.flag_cached_certs.is_some(){
+                && args.flag_auth_key.is_some() && args.flag_cached_certs.is_some() {
         
         
         let (pk_1rtt,epoch_1rtt) = load_pk_and_epoch(
@@ -596,7 +596,7 @@ fn make_config(args: &Args) -> Arc<rustls::ClientConfig> {
                                         .expect("must provide --1rtt-epoch with --1rtt-pk"),
                                         );
 
-        config.set_epoch_pk(pk_1rtt,epoch_1rtt);
+        config.set_epoch_pk(pk_1rtt, epoch_1rtt);
     }
 
     Arc::new(config)
