@@ -85,7 +85,10 @@ class CustomFormatter(logging.Formatter):
 
 class Experiment(NamedTuple):
     """Represents an experiment"""
-    type: Union[Literal["sign"], Literal["pdk"], Literal["kemtls"], Literal["sign-cached"], Literal["pdkss"]]
+    type: Union[
+        Literal["sign"], Literal["pdk"], Literal["kemtls"],
+        Literal["sign-cached"],
+        Literal["pdkss"], Literal["pdkss-async"], Literal["pdkss-update"]]
     kex: str
     leaf: str
     intermediate: Optional[str] = None
@@ -174,7 +177,7 @@ ALGORITHMS = [
     ),
     #    With mutual auth
     *(
-        Experiment("pdk", kex, kex, client_auth=clauth, client_ca=clca)
+        Experiment(exptype, kex, kex, client_auth=clauth, client_ca=clca)
         for kex, clauth, clca in [
             ("Kyber512", "Kyber512", "Dilithium2"),
             ("Lightsaber", "Lightsaber", "Dilithium2"),
@@ -189,7 +192,7 @@ ALGORITHMS = [
             #("NtruHps2048509", "NtruHps2048509", "RainbowIClassic"),
             # Minimal
             ("SikeP434Compressed", "SikeP434Compressed", "RainbowIClassic"),
-        ]
+        ] for exptype in ["pdk", "pdkss", "pdkss-async", "pdkss-update"]
     ),
     #   Special combos with McEliece
     *(
@@ -285,8 +288,18 @@ class ServerProcess(multiprocessing.Process):
         else:
             raise ValueError(f"Invalid Experiment type in {experiment}")
 
-        if type == "pdkss":
-            self.extraopts += ["--1rtt-key", "semistatic-epoch-1.key", "--1rtt-epoch", "semistatic-epoch-1.epoch"]
+        if type.startswith("pdkss"):
+            self.extraopts += [
+                "--1rtt-key", "semistatic-epoch-1.key",
+                "--1rtt-public", "semistatic-epoch-1.pub",
+                "--1rtt-epoch", "semistatic-epoch-1.epoch"
+            ]
+        if type == "pdkss-update":
+            self.extraopts += [
+                "--1rtt-key-next", "semistatic-epoch-2.key",
+                "--1rtt-public-next", "semistatic-epoch-2.pub",
+                "--1rtt-epoch-next", "semistatic-epoch-2.epoch"
+            ]
 
         if experiment.client_auth is not None:
             self.extraopts += ["--require-auth", "--auth", "client-ca.crt"]
@@ -376,10 +389,12 @@ def run_measurement(output_queue, port, experiment: Experiment, cached_int):
     restarts = 0
     allowed_restarts = 2 * MEASUREMENTS_PER_PROCESS / MEASUREMENTS_PER_CLIENT
     cache_args = []
-    if type in ("pdk", "pdkss"):
+    if type.startswith("pdk"):
         cache_args = ["--cached-certs", "kem.crt"]
-        if type == "pdkss":
+        if type in ("pdkss", "pdkss-update"):
             cache_args += ["--1rtt-pk", "semistatic-epoch-1.pub", "--1rtt-epoch", "semistatic-epoch-1.epoch"]
+        elif type == "pdkss-async":
+            cache_args += ["--1rtt-pk", "semistatic-epoch-2.pub", "--1rtt-epoch", "semistatic-epoch-2.epoch"]
     elif type == "sign-cached":
         if not cached_int:
             cache_args = ["--cached-certs", "signing.all.crt"]
