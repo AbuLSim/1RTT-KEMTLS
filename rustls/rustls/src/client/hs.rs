@@ -546,6 +546,7 @@ impl ExpectServerHello {
     }
 
     fn into_expect_server_public_key(self, key_schedule: KeyScheduleHandshake, is_eq_epoch: bool) -> NextState {
+        debug!("expecting server public key");
         Box::new(tls13::ExpectServerPublicKey {
             handshake: self.handshake,
             key_schedule,

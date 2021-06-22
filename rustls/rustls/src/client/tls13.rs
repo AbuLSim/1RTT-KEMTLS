@@ -240,7 +240,7 @@ pub fn start_handshake_traffic(sess: &mut ClientSessionImpl,
             let mut master_secret = handshake_secret.unwrap();
             master_secret.into_ssrttkemtls_master_secret(&shared,&proactive_key_share,true);
             master_secret
-        }else{
+        } else {
             debug!("Using PDK");
             // ES <- HKDF.Extract(dES, ss)
             early_key_schedule.unwrap().into_handshake(&shared)
