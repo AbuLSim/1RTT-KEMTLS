@@ -939,7 +939,7 @@ impl CompleteClientHelloHandling {
                 client_auth = self.emit_certificate_req_tls13(sess)?;
                 self.emit_certificate_tls13(sess, &mut server_key);            // determine if kemtls
                 webpki::EndEntityCert::from(&server_key.end_entity_cert().unwrap().0)
-                    .map(|crt| crt.is_kem_cert(),)
+                    .map(|crt| crt.is_kem_cert())
                     .map_err(|e| TLSError::WebPKIError(e))?
             } else {
                 client_auth = pdk_client_auth;
