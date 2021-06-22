@@ -237,6 +237,10 @@ impl CompleteClientHelloHandling {
         self.handshake.transcript.add_message(&sh);
         sess.common.send_msg(sh, false);
         self.handshake.print_runtime("EMITTED SH");
+    
+        if !self.done_retry {
+            self.emit_fake_ccs(sess);
+        }
 
         // for PDK-SS with matching epoch we now mix in the client cert shared secret and switch to *AHS keys
         if is_eq_epoch {
@@ -928,9 +932,6 @@ impl CompleteClientHelloHandling {
             is_eq_epoch.unwrap_or(false),
             &cert,
         )?;
-        if !self.done_retry {
-            self.emit_fake_ccs(sess);
-        }
         self.emit_encrypted_extensions(sess, &mut server_key, client_hello, resumedata.as_ref(), doing_pdk)?;
 
         let (doing_client_auth, is_kemtls) = if full_handshake {
