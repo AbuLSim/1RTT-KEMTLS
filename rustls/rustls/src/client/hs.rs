@@ -692,10 +692,8 @@ impl State for ExpectServerHello {
         // handshake_traffic_secret.
         if sess.common.is_tls13() {
             tls13::validate_server_hello(sess, &server_hello)?;
-            let is_eq_epoch = match server_hello.find_extension(ExtensionType::ProactiveCiphertextKEMTLS){
-                Some(_) => true,
-                _ => false,
-            };
+            let is_eq_epoch = server_hello.get_accepted_kemtls_ciphertext().is_some();
+
             let key_schedule = tls13::start_handshake_traffic(sess,
                                                               self.early_key_schedule.take(),
                                                               self.handshake_secret.take(),
@@ -707,9 +705,10 @@ impl State for ExpectServerHello {
             // with large certificates (Dilithium).
             // tls13::emit_fake_ccs(&mut self.handshake, sess);
             let is_pdk = server_hello.find_extension(ExtensionType::ProactiveCiphertext).is_some();
+
             // if 1RTT-KEMTLS then check the SPK message
             if sess.ssrtt_data.is_some() {
-                return Ok(self.into_expect_server_public_key(key_schedule,is_eq_epoch));
+                return Ok(self.into_expect_server_public_key(key_schedule, is_eq_epoch));
             }
             return Ok(self.into_expect_tls13_encrypted_extensions(key_schedule, is_pdk));
         }

@@ -195,7 +195,7 @@ impl AlwaysResolves1RTTServerKeys {
         }
     }
 
-    /// Set the next epoch key
+    /// Set the next epoch
     pub fn set_next(&mut self, epoch: Epoch, pk: Vec<u8>, sk: key::PrivateKey) {
         self.next = Some((epoch, pk, sk));
     }

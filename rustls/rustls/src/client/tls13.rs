@@ -430,7 +430,7 @@ pub struct ExpectServerPublicKey{
 }
 
 impl ExpectServerPublicKey {
-    fn into_expect_tls13_encrypted_extensions(self, spk: &ServerPublicKey) -> hs::NextState {
+    fn into_expect_tls13_encrypted_extensions(self, spk: &ServerPublicKey, is_eq_epoch: bool) -> hs::NextState {
         Box::new(ExpectEncryptedExtensions {
             handshake: self.handshake,
             key_schedule: self.key_schedule,
@@ -464,7 +464,8 @@ impl hs::State for ExpectServerPublicKey {
             // if SPK was sent then treat the message
             Ok(spk) => {
                 self.handshake.print_runtime("RECEIVED SPK");
-                Ok(self.into_expect_tls13_encrypted_extensions(spk))
+                let matches = self.is_eq_epoch;
+                Ok(self.into_expect_tls13_encrypted_extensions(spk, matches))
             },
         }
         
@@ -538,7 +539,7 @@ impl hs::State for ExpectEncryptedExtensions {
         let sigv =  verify::HandshakeSignatureValid::assertion();
 
         // if 1RTT-KEMTLS with non-equal epochs, then send certificate
-        if  sess.ssrtt_data.is_some() && self.is_eq_epoch == false{
+        if  sess.ssrtt_data.is_some() && self.is_eq_epoch == false {
             let client_auth = self.client_auth.as_mut().unwrap();
             emit_certificate_tls13(&mut self.handshake, client_auth, sess);
             return Ok(self.into_expect_ciphertext())
