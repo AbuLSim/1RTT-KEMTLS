@@ -111,7 +111,7 @@ impl client::ResolvesEpochPublicKey for NeverResolves1RTTPublicKey{
         None
     }
 
-    fn update(&self, _spk: crate::msgs::handshake::ServerPublicKey) {}
+    fn update(&self, _epoch: Epoch, _key: Vec<u8>) {}
 }
 
 /// Always resolves a 1rtt public key without checking hostname
@@ -133,29 +133,13 @@ impl client::ResolvesEpochPublicKey for AlwaysResolves1RTTPublicKey {
         Some(entry)
     }
 
-    fn update(&self, spk: crate::msgs::handshake::ServerPublicKey) {
-        let epoch = Epoch(spk.epoch.into_inner());
-        let key = spk.public_key.0;
+    fn update(&self, epoch: Epoch, key: Vec<u8>) {
         {
             let mut entry = self.entry.write().unwrap();
             *entry = (epoch, key);
         }
         // todo: should probably write out to disk
     }
-}
-
-// For testing
-pub struct NeverUpdate1RTTPublicKey {
-    epoch: Epoch,
-    key: Vec<u8>,
-}
-
-impl client::ResolvesEpochPublicKey for NeverUpdate1RTTPublicKey {
-    fn get(&self, _hostname: webpki::DNSNameRef) -> Option<(Epoch, Vec<u8>)> {
-        Some((self.epoch.clone(), self.key.clone()))
-    }
-
-    fn update(&self, _spk: crate::msgs::handshake::ServerPublicKey) {}
 }
 
 

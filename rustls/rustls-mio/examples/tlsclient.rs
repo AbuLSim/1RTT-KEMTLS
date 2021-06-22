@@ -24,6 +24,7 @@ use webpki;
 use webpki_roots;
 
 use rustls::Session;
+use rustls::Epoch;
 
 const CLIENT: mio::Token = mio::Token(0);
 
@@ -289,6 +290,20 @@ impl rustls::StoresClientSessions for PersistCache {
             .get(key)
             .cloned()
     }
+}
+
+// For testing
+pub struct NeverUpdate1RTTPublicKeyResolver {
+    epoch: Epoch,
+    key: Vec<u8>,
+}
+
+impl rustls::ResolvesEpochPublicKey for NeverUpdate1RTTPublicKeyResolver {
+    fn get(&self, _hostname: webpki::DNSNameRef) -> Option<(Epoch, Vec<u8>)> {
+        Some((self.epoch.clone(), self.key.clone()))
+    }
+
+    fn update(&self, _epoch: Epoch, _key: Vec<u8>) {}
 }
 
 const USAGE: &'static str = "

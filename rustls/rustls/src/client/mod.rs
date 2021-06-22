@@ -86,8 +86,8 @@ pub trait ResolvesEpochPublicKey: Send + Sync {
     /// get the public key
     fn get(&self, hostname: webpki::DNSNameRef) -> Option<(Epoch, Vec<u8>)>;
 
-    // Update the stored public keys.
-    fn update(&self, spk: ServerPublicKey);
+    /// Update the stored public keys.
+    fn update(&self, epoch: Epoch, public_key: Vec<u8>);
 }
 
 /// Common configuration for (typically) all connections made by

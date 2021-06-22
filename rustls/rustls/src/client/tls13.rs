@@ -1228,7 +1228,9 @@ impl hs::State for ExpectFinished {
         if let Some(spk) = st.spk {
             // client update pk, epoch
             // must change this filename hardcoding
-            sess.config.ssrtt_resolver.update(spk);
+            sess.config.ssrtt_resolver.update(
+                crate::epoch::Epoch(spk.epoch.0),
+                spk.public_key.0);
         };
 
         let hash_after_handshake = st.handshake.transcript.get_current_hash();
