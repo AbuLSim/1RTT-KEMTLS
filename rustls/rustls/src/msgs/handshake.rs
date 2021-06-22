@@ -2342,13 +2342,10 @@ impl ServerPublicKey {
 
     }
 
-    pub fn new(epoch_1rtt: epoch::Epoch, pk_filename: &str) -> ServerPublicKey{
-        let epoch::Epoch(epoch) = epoch_1rtt;
-        let public_key = ServerPublicKey::load_publickey(pk_filename);
-
+    pub fn new(epoch_1rtt: epoch::Epoch, public_key: Vec<u8>) -> ServerPublicKey{
         ServerPublicKey{
             public_key: PayloadU16::new(public_key) ,
-            epoch: PayloadU8::new(epoch),
+            epoch: PayloadU8::new(epoch_1rtt.0),
         }
     }
 

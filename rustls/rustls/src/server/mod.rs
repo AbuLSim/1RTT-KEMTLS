@@ -1,3 +1,4 @@
+use crate::server::handy::NeverResolves1RTTServerKeys;
 use crate::session::{Session, SessionCommon, MiddleboxCCS};
 use crate::keylog::{KeyLog, NoKeyLog};
 use crate::suites::{SupportedCipherSuite, ALL_CIPHERSUITES};
@@ -7,7 +8,7 @@ use crate::msgs::enums::{AlertDescription, HandshakeType, ProtocolVersion};
 use crate::msgs::handshake::ServerExtension;
 use crate::msgs::message::Message;
 use crate::error::TLSError;
-use crate::sign;
+use crate::{Epoch, sign};
 use crate::verify;
 use crate::key;
 #[cfg(feature = "logging")]
@@ -19,15 +20,14 @@ use std::sync::Arc;
 use std::io::{self, IoSlice};
 use std::fmt;
 
+use self::handy::AlwaysResolves1RTTServerKeys;
+
 #[macro_use]
 mod hs;
 mod tls12;
 mod tls13;
 mod common;
 pub mod handy;
-
-/// 1RTT-KEMTLS
-use crate::epoch;
 
 /// A trait for the ability to store server session data.
 ///
@@ -103,6 +103,15 @@ pub trait ResolvesServerCert : Send + Sync {
     /// 
     /// Return `None` to abort the handshake.
     fn resolve(&self, client_hello: ClientHello) -> Option<sign::CertifiedKey>;
+}
+
+/// Fetches 1rtt keys and epochs
+pub trait Resolves1RTTServerKeys: Send + Sync {
+    /// Fetch a private key for use with a specified epoch
+    fn get(&self, epoch: &Epoch) -> Option<key::PrivateKey>;
+
+    /// Get the next epoch public keys
+    fn next(&self, current: Option<&Epoch>) -> Option<(Epoch, Vec<u8>)>;
 }
 
 /// A struct representing the received Client Hello
@@ -183,11 +192,8 @@ pub struct ServerConfig {
     /// does nothing.
     pub key_log: Arc<dyn KeyLog>,
 
-    /// 1RTT-KEMTLS server temporary secret key
-    pub key_1rtt: Arc<Box<dyn sign::SigningKey>>,
-    
-    /// 1RTT-KEMTLS server epoch number
-    pub epoch_1rtt: Option<epoch::Epoch>,
+    /// 1RTT-KEMTLS server temporary secret key resolver
+    pub ssrtt_resolver: Arc<dyn Resolves1RTTServerKeys>,
 
     /// Amount of early data to accept; 0 to disable.
     #[cfg(feature = "quic")]    // TLS support unimplemented
@@ -241,8 +247,7 @@ impl ServerConfig {
             key_log: Arc::new(NoKeyLog {}),
 
             // 1RTT-KEMTLS
-            key_1rtt: Arc::new(Box::new(sign::NoKey {})),
-            epoch_1rtt: None,
+            ssrtt_resolver: Arc::new(NeverResolves1RTTServerKeys),
 
             #[cfg(feature = "quic")]
             max_early_data_size: 0,
@@ -329,12 +334,10 @@ impl ServerConfig {
 
 
     /// 1RTT-KEMTLS setting public key and epoch
-    pub fn set_key_epoch(&mut self, key_1rtt: &key::PrivateKey, epoch_1rtt: epoch::Epoch) -> Result<(),TLSError>{
+    pub fn set_key_epoch(&mut self, public_1rtt: Vec<u8>, key_1rtt: &key::PrivateKey, epoch_1rtt: Epoch) -> Result<(),TLSError>{
         // parse the der PrivateKey into any supported type key
-        let privkey =  sign::any_supported_type(key_1rtt)
-                            .map_err(|_| TLSError::General("invalid private key".into()))?;
-        self.key_1rtt = Arc::new(privkey);
-        self.epoch_1rtt = Some(epoch_1rtt);
+        
+        self.ssrtt_resolver = Arc::new(AlwaysResolves1RTTServerKeys::new(epoch_1rtt, public_1rtt, key_1rtt.clone()));
         Ok(())
     }
 }
@@ -354,6 +357,8 @@ pub struct ServerSessionImpl {
     pub reject_early_data: bool,
     /// RFC 7924
     cached_certificate_hashes: Vec<Vec<u8>>,
+    /// Client's idea of the epoch
+    pub ssrtt_client_epoch: Option<Epoch>,
 }
 
 impl fmt::Debug for ServerSessionImpl {
@@ -378,6 +383,7 @@ impl ServerSessionImpl {
             client_cert_chain: None,
             reject_early_data: false,
             cached_certificate_hashes: Vec::new(),
+            ssrtt_client_epoch: None,
         }
     }
 

@@ -1,3 +1,4 @@
+use crate::Epoch;
 use crate::sign;
 use crate::key;
 use webpki;
@@ -176,6 +177,77 @@ impl server::ResolvesServerCert for ResolvesServerCertUsingSNI {
         }
     }
 }
+
+/// Very simple resolver for 1rtt server keys.
+/// Could do much fancier stuff with vecs etc.
+/// Does not assume Epoch values are orderable
+pub struct AlwaysResolves1RTTServerKeys {
+    current: (Epoch, Vec<u8>, key::PrivateKey),
+    next: Option<(Epoch, Vec<u8>, key::PrivateKey)>,
+}
+
+impl AlwaysResolves1RTTServerKeys {
+    /// Create a new resolver
+    pub fn new(epoch: Epoch, pk: Vec<u8>, sk: key::PrivateKey) -> Self {
+        AlwaysResolves1RTTServerKeys {
+            current: (epoch, pk, sk),
+            next: None,
+        }
+    }
+
+    /// Set the next epoch key
+    pub fn set_next(&mut self, epoch: Epoch, pk: Vec<u8>, sk: key::PrivateKey) {
+        self.next = Some((epoch, pk, sk));
+    }
+}
+
+impl server::Resolves1RTTServerKeys for AlwaysResolves1RTTServerKeys {
+    fn get(&self, epoch: &Epoch) -> Option<key::PrivateKey> {
+        if epoch == &self.current.0 {
+            Some(self.current.2.clone())
+        } else if let Some((nextep, _, nextsk)) = &self.next {
+            if nextep == epoch {
+                Some(nextsk.clone())
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }
+
+    fn next(&self, current: Option<&Epoch>) -> Option<(Epoch, Vec<u8>)> {
+        if current.is_none() {
+            return Some((self.current.0.clone(), self.current.1.clone()));
+        }
+        let current = current.unwrap();
+        if let Some((nextep, nextpk, _)) = &self.next {
+            if nextep == current {
+                None
+            } else {
+                Some((nextep.clone(), nextpk.clone()))
+            }
+        } else if current != &self.current.0 {
+            Some((self.current.0.clone(), self.current.1.clone()))
+        } else {
+            None
+        }
+    }
+}
+
+/// Resolver that simply always returns None, for when PDK-SS isn't set up
+pub struct NeverResolves1RTTServerKeys;
+
+impl server::Resolves1RTTServerKeys for NeverResolves1RTTServerKeys {
+    fn get(&self, _epoch: &Epoch) -> Option<key::PrivateKey> {
+        None
+    }
+
+    fn next(&self, _current: Option<&Epoch>) -> Option<(Epoch, Vec<u8>)> {
+        None
+    }
+}
+
 
 #[cfg(test)]
 mod test {

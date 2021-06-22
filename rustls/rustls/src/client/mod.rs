@@ -4,7 +4,7 @@ use crate::msgs::enums::{AlertDescription, HandshakeType};
 use crate::session::{Session, SessionCommon, MiddleboxCCS};
 use crate::keylog::{KeyLog, NoKeyLog};
 use crate::suites::{SupportedCipherSuite, ALL_CIPHERSUITES};
-use crate::msgs::handshake::{CertificatePayload, ServerPublicKey};
+use crate::msgs::handshake::CertificatePayload;
 use crate::msgs::enums::SignatureScheme;
 use crate::msgs::enums::{ContentType, ProtocolVersion};
 use crate::msgs::handshake::ClientExtension;
