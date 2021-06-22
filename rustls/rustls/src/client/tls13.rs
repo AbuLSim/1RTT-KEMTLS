@@ -431,7 +431,7 @@ pub struct ExpectServerPublicKey{
 }
 
 impl ExpectServerPublicKey {
-    fn into_expect_tls13_encrypted_extensions(self, spk: &ServerPublicKey, is_eq_epoch:bool) -> hs::NextState {
+    fn into_expect_tls13_encrypted_extensions(self, spk: &ServerPublicKey) -> hs::NextState {
         Box::new(ExpectEncryptedExtensions {
             handshake: self.handshake,
             key_schedule: self.key_schedule,
@@ -440,7 +440,7 @@ impl ExpectServerPublicKey {
             is_pdk: true,
             client_auth: self.client_auth,
             spk: Some(spk.clone()),
-            is_eq_epoch,
+            is_eq_epoch: self.is_eq_epoch,
         })
     }
 }
@@ -465,7 +465,7 @@ impl hs::State for ExpectServerPublicKey {
             // if SPK was sent then treat the message
             Ok(spk) => {
                 self.handshake.print_runtime("RECEIVED SPK");
-                Ok(self.into_expect_tls13_encrypted_extensions(spk,false))
+                Ok(self.into_expect_tls13_encrypted_extensions(spk))
             },
         }
         

@@ -343,7 +343,6 @@ impl CompleteClientHelloHandling {
                             sess: &mut ServerSessionImpl,
                             pk_filename: &str) 
                             -> Result<(), TLSError> {
-        
         // read pk from a file
         let epoch = sess.config.epoch_1rtt.clone().unwrap();
         let server_public_key = ServerPublicKey::new(epoch,pk_filename);
@@ -361,7 +360,6 @@ impl CompleteClientHelloHandling {
         sess.common.send_msg(spk, true);
         self.handshake.print_runtime("SENT SPK");
         Ok(())
-
     }
 
     fn emit_certificate_req_tls13(&mut self, sess: &mut ServerSessionImpl) -> Result<bool, TLSError> {
@@ -821,7 +819,6 @@ impl CompleteClientHelloHandling {
         &mut self, sess: &mut ServerSessionImpl,
         handshake_secret: &mut KeyScheduleHandshake,
         ss_ephemeral: &[u8], ss_client: &[u8],
-        new_semi_static_pk : bool,
     ){
         let handshake = &self.handshake;
         handshake.print_runtime("DERIVING MS");
@@ -853,10 +850,6 @@ impl CompleteClientHelloHandling {
                 .record_layer
                 .set_message_decrypter(cipher::new_tls13_read(suite, &read_key));
         
-        // to be added {SPK:= ServerPublicKey}*_SAHTS : t+1, pk_s^{t+1}
-        if new_semi_static_pk {
-            todo!()
-        }
         handshake.print_runtime("DERIVED MS");
     }
 
@@ -918,6 +911,7 @@ impl CompleteClientHelloHandling {
              self.emit_fake_ccs(sess);
         }
 
+        // 1RTT-KEMTLS with not equal epoch
         if Some(false) == is_eq_epoch{
             // Emit {SPK:= ServerPublicKey}
             let pk_filename = "../../certificates/1RTT-KEMTLS/new_kem_ssrttkemtls.pub";
@@ -949,7 +943,7 @@ impl CompleteClientHelloHandling {
             self.emit_encrypted_extensions(sess, &mut server_key, client_hello, resumedata.as_ref(), doing_pdk)?;
         };
 
-        // starting KEMTLS or 1RTT-KEMTLS
+        // starting KEMTLS or 1RTT-KEMTLS with equal epochs
         let (doing_client_auth, is_kemtls) = if full_handshake {
             let client_auth;
             let is_kemtls = if !doing_pdk {
@@ -1039,11 +1033,19 @@ impl CompleteClientHelloHandling {
                     self.emit_fake_ccs(sess);
 
                     // continue the key scheduling
+                    // to be added {SPK:= ServerPublicKey}*_SAHTS : t+1, pk_s^{t+1}
                     self.prepare_finished_ssrttkemtls_eq_epoch(
                         sess, &mut key_schedule,
                         &ss_ephemeral, &ss.clone().into_vec(),
-                        false,
-                    );
+                        );
+
+                    // simon: this needs to be changed (hardcoded certificate and timelap boolean propagation)
+                    let is_update_client = true;
+                    if is_update_client {
+                        let pk_filename = "../../certificates/1RTT-KEMTLS/new_kem_ssrttkemtls.pub";
+                        self.emit_server_public_key(sess, pk_filename)?;
+                    }
+
                     //{EE := EncryptedExtensions}_SAHTS
                     self.emit_encrypted_extensions(sess, &mut server_key, client_hello, resumedata.as_ref(), doing_pdk)?;
                 }

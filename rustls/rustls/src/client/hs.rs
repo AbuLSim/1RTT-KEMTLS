@@ -599,6 +599,7 @@ impl State for ExpectServerHello {
         trace!("We got ServerHello {:#?}", server_hello);
         self.handshake.print_runtime("RECEIVED SH");
 
+
         use crate::ProtocolVersion::{TLSv1_2, TLSv1_3};
         let tls13_supported = sess.config.supports_version(TLSv1_3);
 
@@ -691,8 +692,10 @@ impl State for ExpectServerHello {
         // handshake_traffic_secret.
         if sess.common.is_tls13() {
             tls13::validate_server_hello(sess, &server_hello)?;
-            let is_eq_epoch = self.handshake_secret.is_some();
-
+            let is_eq_epoch = match server_hello.find_extension(ExtensionType::ProactiveCiphertextKEMTLS){
+                Some(_) => true,
+                _ => false,
+            };
             let key_schedule = tls13::start_handshake_traffic(sess,
                                                               self.early_key_schedule.take(),
                                                               self.handshake_secret.take(),
