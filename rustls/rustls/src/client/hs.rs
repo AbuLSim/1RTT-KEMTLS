@@ -334,12 +334,11 @@ fn emit_client_hello_for_retry(sess: &mut ClientSessionImpl,
         }else {
             // 1RTT-KEMTLS
             // HS <- HKDF.Extract(ES,K^t_S)
-            handshake.print_runtime("DERIVING HANDSHAKE SECRET HS");
             let early_secret = Some(KeyScheduleEarly::new(ALL_CIPHERSUITES[0].hkdf_algorithm, ss.as_ref()));
             let sskemtls = semi_static_kemtls_key.unwrap();
             let sskemtlsvec = sskemtls.into_vec();
             handshake_secret = Some(early_secret.unwrap().into_handshake(&sskemtlsvec));
-            handshake.print_runtime("DERIVED HANDSHAKE SECRET HS");
+            handshake.print_runtime("DERIVED HS");
             // Return ES for 1RTT-KEMTLS when epochs do not match
             Some(KeyScheduleEarly::new(ALL_CIPHERSUITES[0].hkdf_algorithm, ss.as_ref()))
         }

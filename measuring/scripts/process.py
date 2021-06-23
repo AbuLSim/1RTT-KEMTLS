@@ -55,9 +55,9 @@ def get_experiment_name(experiment):
 
     kex = KEX_RENAMES.get(kex, kex[0].upper())
     leaf = AUTH_RENAMES.get(leaf, leaf[0].upper())
-    if inter is not None and type == "sigcache" or type.startswith("pdk"):
+    if inter is not None and not (type == "sigcache" or type.startswith("pdk")):
         inter = SIG_RENAMES.get(inter, inter[0].upper())
-    elif inter is None or type == "sigcache" or type.startswith("pdk"):
+    elif inter is None or (type == "sigcache" or type.startswith("pdk")):
         inter = ""
     if root is not None and not type.startswith("pdk"):
         root = SIG_RENAMES.get(root, root[0].upper())
@@ -124,12 +124,11 @@ AVG_FIELDS = [
             "creating keyshares",
             "created keyshares",
             "created pdk encapsulation",
-            "created pdk 1rtt-kemtls encapsulation"
+            "created pdk 1rtt-kemtls encapsulation",
             "sending chelo",
             "received sh",
             "decapsulating ephemeral",
             "decapsulated ephemeral",
-            "deriving handshake secret hs",
             "derived hs",
             "received cert",
             "submitted ckex to server",
@@ -176,6 +175,7 @@ AVG_FIELDS = [
             "received certificate",
             "encapsulating to client",
             "submitted skex to client",
+            "derived ms",
             "received certv",
             "received finished",
             "authenticated client",
@@ -206,7 +206,7 @@ def format_results_tex(avgs):
 
         texfile.write(macro("clientdone", avgs["client handshake completed"]))
         texfile.write(macro("serverdone", avgs["server handshake completed"]))
-        texfile.write(macro("serverexplicitauthed", avgs["client authenticated server"]))
+        texfile.write(macro("serverexplicitauthed", avgs.get("client authenticated server", avgs["client received finished"])))
         texfile.write(macro("clientgotreply", avgs["client received server reply"]))
 
 
@@ -243,7 +243,7 @@ def write_averages(experiments):
 
 
 EXPERIMENT_REGEX = re.compile(
-    r"(?P<type>(kemtls|sign|sign-cached|pdk|pdkss|pdkss-async|pdkss-update)"
+    r"(?P<type>(kemtls|sign|sign-cached|pdk|pdkss|pdkss-async|pdkss-update))"
     r"-(?P<cached>(int-chain|int-only))/"
     r"(?P<kex>[^_]+)_(?P<leaf>[^_]+)_(?P<int>[^_]+)(_(?P<root>[^_]+))?"
     r"(_clauth_(?P<clauth>[^_]+)_(?P<clca>[^_]+))?"
