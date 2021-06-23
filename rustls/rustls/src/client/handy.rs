@@ -1,3 +1,4 @@
+use crate::epoch::Epoch;
 use crate::msgs::enums::SignatureScheme;
 use crate::sign;
 use crate::key;
@@ -5,7 +6,7 @@ use crate::client;
 use crate::error::TLSError;
 
 use std::collections;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 
 /// An implementor of `StoresClientSessions` which does nothing.
 pub struct NoClientSessionStorage {}
@@ -102,6 +103,45 @@ impl client::ResolvesClientCert for AlwaysResolvesClientCert {
         true
     }
 }
+
+pub struct NeverResolves1RTTPublicKey;
+
+impl client::ResolvesEpochPublicKey for NeverResolves1RTTPublicKey{
+    fn get(&self, _hostname: webpki::DNSNameRef) -> Option<(Epoch, Vec<u8>)> {
+        None
+    }
+
+    fn update(&self, _epoch: Epoch, _key: Vec<u8>) {}
+}
+
+/// Always resolves a 1rtt public key without checking hostname
+pub struct AlwaysResolves1RTTPublicKey {
+    entry: RwLock<(Epoch, Vec<u8>)>,
+}
+
+impl AlwaysResolves1RTTPublicKey {
+    pub fn new(epoch: Epoch, key: Vec<u8>) -> Self {
+        AlwaysResolves1RTTPublicKey {
+            entry: RwLock::new((epoch, key)),
+        }
+    }
+}
+
+impl client::ResolvesEpochPublicKey for AlwaysResolves1RTTPublicKey {
+    fn get(&self, _: webpki::DNSNameRef) -> Option<(Epoch, Vec<u8>)> {
+        let entry = self.entry.read().unwrap().clone();
+        Some(entry)
+    }
+
+    fn update(&self, epoch: Epoch, key: Vec<u8>) {
+        {
+            let mut entry = self.entry.write().unwrap();
+            *entry = (epoch, key);
+        }
+        // todo: should probably write out to disk
+    }
+}
+
 
 #[cfg(test)]
 mod test {

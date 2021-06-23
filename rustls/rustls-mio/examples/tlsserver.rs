@@ -19,7 +19,7 @@ use docopt::Docopt;
 
 use env_logger;
 
-use rustls;
+use rustls::{self, AlwaysResolves1RTTServerKeys};
 
 use rustls::{
     AllowAnyAnonymousOrAuthenticatedClient, AllowAnyAuthenticatedClient, NoClientAuth,
@@ -424,34 +424,38 @@ Usage:
   tlsserver (--help | -h)
 
 Options:
-    -p, --port PORT     Listen on PORT [default: 443].
-    --certs CERTFILE    Read server certificates from CERTFILE.
-                        This should contain PEM-format certificates
-                        in the right order (the first certificate should
-                        certify KEYFILE, the last should be a root CA).
-    --key KEYFILE       Read private key from KEYFILE.  This should be a RSA
-                        private key or PKCS8-encoded private key, in PEM format.
-    --ocsp OCSPFILE     Read DER-encoded OCSP response from OCSPFILE and staple
-                        to certificate.  Optional.
-    --auth CERTFILE     Enable client authentication, and accept certificates
-                        signed by those roots provided in CERTFILE.
-    --require-auth      Send a fatal alert if the client does not complete client
-                        authentication.
-    --1rtt-key KEYFILE  Read server private key to activate 1RTT-KEMTLS
-                        WARNING: this private key has to be of the same algorithm
-                        As key from KEYFILE
-    --1rtt-epoch EPOCH  Read server epoch to activate 1RTT-KEMTLS
-    --resumption        Support session resumption.
-    --tickets           Support tickets.
-    --protover VERSION  Disable default TLS version list, and use
-                        VERSION instead.  May be used multiple times.
-    --suite SUITE       Disable default cipher suite list, and use
-                        SUITE instead.  May be used multiple times.
-    --proto PROTOCOL    Negotiate PROTOCOL using ALPN.
-                        May be used multiple times.
-    --verbose           Emit log output.
-    --version, -v       Show tool version.
-    --help, -h          Show this screen.
+    -p, --port PORT         Listen on PORT [default: 443].
+    --certs CERTFILE        Read server certificates from CERTFILE.
+                            This should contain PEM-format certificates
+                            in the right order (the first certificate should
+                            certify KEYFILE, the last should be a root CA).
+    --key KEYFILE           Read private key from KEYFILE.  This should be a RSA
+                            private key or PKCS8-encoded private key, in PEM format.
+    --ocsp OCSPFILE         Read DER-encoded OCSP response from OCSPFILE and staple
+                            to certificate.  Optional.
+    --auth CERTFILE         Enable client authentication, and accept certificates
+                            signed by those roots provided in CERTFILE.
+    --require-auth          Send a fatal alert if the client does not complete client
+                            authentication.
+    --1rtt-key KEYFILE      Read server private key to activate 1RTT-KEMTLS
+                            WARNING: this private key has to be of the same algorithm
+                            As key from KEYFILE
+    --1rtt-public KEY       Read server public key for 1RTT-KEMTLS
+    --1rtt-epoch EPOCH      Read server epoch to activate 1RTT-KEMTLS
+    --1rtt-key-next KF      next private key
+    --1rtt-epoch-next EP    next epoch
+    --1rtt-public-next PK   next public key
+    --resumption            Support session resumption.
+    --tickets               Support tickets.
+    --protover VERSION      Disable default TLS version list, and use
+                            VERSION instead.  May be used multiple times.
+    --suite SUITE           Disable default cipher suite list, and use
+                            SUITE instead.  May be used multiple times.
+    --proto PROTOCOL        Negotiate PROTOCOL using ALPN.
+                            May be used multiple times.
+    --verbose               Emit log output.
+    --version, -v           Show tool version.
+    --help, -h              Show this screen.
 ";
 
 #[derive(Debug, Deserialize)]
@@ -472,6 +476,10 @@ struct Args {
     //1RTT-KEMTLS
     flag_1rtt_key: Option<String>,
     flag_1rtt_epoch: Option<String>,
+    flag_1rtt_public: Option<String>,
+    flag_1rtt_key_next: Option<String>,
+    flag_1rtt_epoch_next: Option<String>,
+    flag_1rtt_public_next: Option<String>,
     flag_resumption: bool,
     flag_tickets: bool,
     arg_fport: Option<u16>,
@@ -559,6 +567,11 @@ fn load_epoch(filename: &str) -> rustls::epoch::Epoch {
     rustls::internal::pemfile::epoch(&mut reader).expect("The epoch file should contain some data")
 }
 
+fn load_pk(filename: &str) -> Vec<u8> {
+    let pkfile = fs::File::open(filename).expect("cannot open public key file");
+    let mut reader = BufReader::new(pkfile);
+    rustls::internal::pemfile::pk(&mut reader).expect("The public key file should contain some data")
+}
 
 fn load_ocsp(filename: &Option<String>) -> Vec<u8> {
     let mut ret = Vec::new();
@@ -632,19 +645,26 @@ fn make_config(args: &Args) -> Arc<rustls::ServerConfig> {
     );
     
     // 1RTT-KEMTLS
-    if args.flag_1rtt_epoch.is_some() ||  args.flag_1rtt_key.is_some(){
-        if args.flag_require_auth{
-            let epoch_1rtt = load_epoch(args.flag_1rtt_epoch.as_ref()
-                            .expect("must provide --1rtt-epoch with --1rtt-key"));
-            let privkey_1rtt = load_private_key(args.flag_1rtt_key.as_ref()
-                                .expect("must provide --1rtt-key with --1rtt-epoch"));
-            
-            // parse the der key into any supported type key
-            config.set_key_epoch(&privkey_1rtt,epoch_1rtt)
-                            .expect("bad 1RTT-KEMTLS private key");
-        }else{
+    if args.flag_1rtt_epoch.is_some() ||  args.flag_1rtt_key.is_some() || args.flag_1rtt_public.is_some() || args.flag_1rtt_epoch_next.is_some() || args.flag_1rtt_key_next.is_some() || args.flag_1rtt_public_next.is_some() {
+        if !args.flag_require_auth {
             panic!("1RTT-KEMTLS mode requires the following option: --require-auth");
         }
+        let epoch_1rtt = load_epoch(args.flag_1rtt_epoch.as_ref()
+                        .expect("must provide --1rtt-epoch with --1rtt-key"));
+        let privkey_1rtt = load_private_key(args.flag_1rtt_key.as_ref()
+                            .expect("must provide --1rtt-key with --1rtt-epoch"));
+        let pk_1rtt = load_pk(args.flag_1rtt_public.as_ref().expect("must provide --1rtt-public with --1rtt flags"));
+        
+        // parse the der key into any supported type key
+        let mut resolver = AlwaysResolves1RTTServerKeys::new(epoch_1rtt, pk_1rtt, privkey_1rtt);
+
+        if args.flag_1rtt_epoch_next.is_some() || args.flag_1rtt_key_next.is_some() || args.flag_1rtt_public_next.is_some() {
+            let next_ep = load_epoch(args.flag_1rtt_epoch_next.as_ref().expect("need --1rtt-epoch-next with --1rttt-x-next"));
+            let next_pk = load_pk(args.flag_1rtt_public_next.as_ref().expect("need --1rtt-public-next with --1rttt-x-next"));
+            let next_sk = load_private_key(args.flag_1rtt_key_next.as_ref().expect("need --1rtt-key-next with --1rttt-x-next"));
+            resolver.set_next(next_ep, next_pk, next_sk);
+        }
+        config.ssrtt_resolver = Arc::new(resolver);
     }
     Arc::new(config)
 }

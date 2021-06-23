@@ -24,6 +24,7 @@ use webpki;
 use webpki_roots;
 
 use rustls::Session;
+use rustls::Epoch;
 
 const CLIENT: mio::Token = mio::Token(0);
 
@@ -291,6 +292,20 @@ impl rustls::StoresClientSessions for PersistCache {
     }
 }
 
+// For testing
+pub struct NeverUpdate1RTTPublicKeyResolver {
+    epoch: Epoch,
+    key: Vec<u8>,
+}
+
+impl rustls::ResolvesEpochPublicKey for NeverUpdate1RTTPublicKeyResolver {
+    fn get(&self, _hostname: webpki::DNSNameRef) -> Option<(Epoch, Vec<u8>)> {
+        Some((self.epoch.clone(), self.key.clone()))
+    }
+
+    fn update(&self, _epoch: Epoch, _key: Vec<u8>) {}
+}
+
 const USAGE: &'static str = "
 Connects to the TLS server at hostname:PORT.  The default PORT
 is 443.  By default, this reads a request from stdin (to EOF)
@@ -318,6 +333,7 @@ Options:
     --1rtt-epoch EPOCH    Read known client epoch to activate 1RTT-KEMTLS
                           These two previous options should only be activated
                           With client authentication and cached certificates
+    --1rtt-nocommit       Don't actually accept 1rtt key updates (for testing)
     --protover VERSION    Disable default TLS version list, and use
                           VERSION instead.  May be used multiple times.
     --suite SUITE         Disable default cipher suite list, and use
@@ -349,6 +365,7 @@ struct Args {
     //1RTT-KEMTLS
     flag_1rtt_pk: Option<String>,
     flag_1rtt_epoch: Option<String>,
+    flag_1rtt_nocommit: bool,
     flag_no_tickets: bool,
     flag_no_sni: bool,
     flag_insecure: bool,
@@ -586,7 +603,9 @@ fn make_config(args: &Args) -> Arc<rustls::ClientConfig> {
 
     // 1RTT-KEMTLS
     if (args.flag_1rtt_epoch.is_some() ||  args.flag_1rtt_pk.is_some()) 
-                && args.flag_auth_key.is_some() && args.flag_cached_certs.is_some(){
+                && args.flag_auth_key.is_some() && args.flag_cached_certs.is_some() {
+
+        let nocommit = args.flag_1rtt_nocommit;
         
         
         let (pk_1rtt,epoch_1rtt) = load_pk_and_epoch(
@@ -596,9 +615,15 @@ fn make_config(args: &Args) -> Arc<rustls::ClientConfig> {
                                         .expect("must provide --1rtt-epoch with --1rtt-pk"),
                                         );
 
-        config.set_epoch_pk(pk_1rtt,epoch_1rtt);
+        if !nocommit {
+            config.set_epoch_pk(pk_1rtt, epoch_1rtt);
+        } else {
+            config.ssrtt_resolver = Arc::new(NeverUpdate1RTTPublicKeyResolver {
+                epoch: epoch_1rtt,
+                key: pk_1rtt,
+            })
+        }
     }
-
     Arc::new(config)
 }
 

@@ -1,4 +1,4 @@
-use crate::{Certificate, key_schedule::{KeyScheduleComputesClientFinish, KeyScheduleComputesServerFinish, KeyScheduleTrafficWithServerFinishedPending}};
+use crate::{Certificate, Epoch, key_schedule::{KeyScheduleComputesClientFinish, KeyScheduleComputesServerFinish, KeyScheduleTrafficWithServerFinishedPending}};
 use crate::msgs::enums::{AlertDescription, SignatureScheme, NamedGroup, ContentType, HandshakeType, ProtocolVersion};
 use crate::msgs::enums::{Compression, PSKKeyExchangeMode};
 use crate::msgs::enums::KeyUpdateRequest;
@@ -136,7 +136,10 @@ impl CompleteClientHelloHandling {
                         pdk_client_auth: bool,
                         full_handshake: bool,
                         doing_pdk: bool,
-                        sigschemes_ext: Vec<SignatureScheme>,)  -> hs::NextState{
+                        sigschemes_ext: Vec<SignatureScheme>,
+                        is_eq_epoch: Option<bool>,
+                        second_try: bool,
+                    )  -> hs::NextState{
         
         Box::new(ExpectPDKCertificate {
             expect_hello: self,
@@ -145,7 +148,7 @@ impl CompleteClientHelloHandling {
             key_schedule_early: None,
             handshake_secret: Some(key_schedule),
             // is eq_epoch shall be set to true in order to receive the PDKCertificate
-            is_eq_epoch: None,
+            is_eq_epoch,
             chosen_share: chosen_share.clone(),
             chosen_psk_index,
             resumedata,
@@ -155,6 +158,7 @@ impl CompleteClientHelloHandling {
             full_handshake,
             doing_pdk,
             sigschemes_ext,
+            second_try,
         })
     }
 
@@ -166,8 +170,10 @@ impl CompleteClientHelloHandling {
                          resuming_psk: Option<&[u8]>,
                          chosen_proactive_ct_cert_hash: Option<PayloadU8>,
                          maybe_key_schedule: Option<KeyScheduleEarly>,
-                        )
-                           -> Result<KeyScheduleHandshake, TLSError> {
+                         maybe_key_schedule_handshake: Option<KeyScheduleHandshake>,
+                         is_eq_epoch: bool,
+                         cert: &Option<ClientCertDetails>,
+                        ) -> Result<KeyScheduleHandshake, TLSError> {
         let mut extensions = Vec::new();
 
         // Do key exchange
@@ -187,6 +193,27 @@ impl CompleteClientHelloHandling {
         if let Some(cert_hash) = chosen_proactive_ct_cert_hash {
             extensions.push(ServerExtension::ProactiveCiphertextAccepted(cert_hash));
         }
+
+        let ss_client = if is_eq_epoch {
+            let mandatory = sess.config.verifier.client_auth_mandatory(sess.get_sni())
+                .ok_or_else(|| {
+                    debug!("could not determine if client auth is mandatory based on SNI");
+                    sess.common.send_fatal_alert(AlertDescription::AccessDenied);
+                    TLSError::General("client rejected by client_auth_mandatory".into())
+            })?;
+            if mandatory && cert.is_none() {
+                sess.common.send_fatal_alert(AlertDescription::CertificateRequired);
+                return Err(TLSError::NoCertificatesPresented);
+            }
+            let cert = cert.as_ref().expect("should have a cert here");
+            let certificate = webpki::EndEntityCert::from(&cert.cert_chain[0].0)
+                .map_err(TLSError::WebPKIError)?;
+            let (ct, ss) = certificate.encapsulate().map_err(|_| TLSError::DecryptError)?;
+            extensions.push(ServerExtension::ProactiveCiphertextKEMTLSAccepted(PayloadU16::new(ct.into_vec())));
+            Some(ss)
+        } else {
+            None
+        };
 
         let sh = Message {
             typ: ContentType::Handshake,
@@ -214,8 +241,23 @@ impl CompleteClientHelloHandling {
         self.handshake.transcript.add_message(&sh);
         sess.common.send_msg(sh, false);
         self.handshake.print_runtime("EMITTED SH");
+    
+        if !self.done_retry {
+            self.emit_fake_ccs(sess);
+        }
 
-        // Start key schedule
+        // for PDK-SS with matching epoch we now mix in the client cert shared secret and switch to *AHS keys
+        if is_eq_epoch {
+            let mut hs_ks = maybe_key_schedule_handshake.unwrap();
+            self.prepare_finished_ssrttkemtls_eq_epoch(
+                sess,
+                 &mut hs_ks,
+                 kxr.shared_secret.as_ref(),
+                 ss_client.unwrap().as_ref())?;
+            return Ok(hs_ks);
+        }
+
+        // Start key schedule for normal procedures
         let suite = sess.common.get_suite_assert();
         let mut key_schedule = if let Some(psk) = resuming_psk {
             let early_key_schedule = KeyScheduleEarly::new(suite.hkdf_algorithm, psk);
@@ -339,13 +381,16 @@ impl CompleteClientHelloHandling {
         Ok(())
     }
 
-    fn emit_server_public_key(&mut self,
-                            sess: &mut ServerSessionImpl,
-                            pk_filename: &str) 
+    fn maybe_emit_server_public_key(&self,
+                            sess: &mut ServerSessionImpl)
                             -> Result<(), TLSError> {
         // read pk from a file
-        let epoch = sess.config.epoch_1rtt.clone().unwrap();
-        let server_public_key = ServerPublicKey::new(epoch,pk_filename);
+        let epoch = sess.config.ssrtt_resolver.next(sess.ssrtt_client_epoch.as_ref());
+        if epoch.is_none() {
+            return Ok(());
+        }
+        let epoch = epoch.unwrap();
+        let server_public_key = ServerPublicKey::new(epoch.0, epoch.1);
 
         let spk = Message {
             typ: ContentType::Handshake,
@@ -677,6 +722,7 @@ impl CompleteClientHelloHandling {
         let mut proactive_static_shared_secret = None;
         let mut proactive_semi_static_shared_secret = None;
         let mut proactive_ss_certificate_hash = None;
+        // this variable both indicates if we're doing 1RTT-KEMTLS/PDK-SS (Some or None) and if the epoch matches (Some(true/false))
         let mut is_eq_epoch = None;
         if chosen_psk_index.is_none() {
             if let Ok(offer) = doing_pdk {
@@ -697,30 +743,36 @@ impl CompleteClientHelloHandling {
             // check if client has sent the 1RTT-KEMTLS extension
             if let Some(pdk_kemtls) = client_hello.get_proactive_ciphertext_kemtls() {
                 // check equality between epochs
-                let client_epoch = pdk_kemtls.epoch.clone().into_inner();
+                let client_epoch = Epoch(pdk_kemtls.epoch.clone().into_inner());
+                let epoch_sk = sess.config.ssrtt_resolver.get(&client_epoch);
+                sess.ssrtt_client_epoch = Some(client_epoch);
 
                 // if server does not have epoch i.e. does not speak 1RTT-KEMTLS 
-                if sess.config.epoch_1rtt.is_none(){
+                if epoch_sk.is_none() && sess.config.ssrtt_resolver.next(sess.ssrtt_client_epoch.as_ref()).is_none() {
                     // simon: there might be a way not to fail and continue another protocol
                     sess.common.send_fatal_alert(AlertDescription::NoApplicationProtocol);
                     return Err(TLSError::PeerIncompatibleError("Clients sent a semi static epoch number for 1RTT-KEMTLS.\
                                     Server does not have an epoch number.".to_string()));
                 }
-                let server_epoch = sess.config.epoch_1rtt.clone();
                 // Checking t_s == t_c
-                is_eq_epoch = Some(client_epoch == server_epoch.unwrap().0);
+                is_eq_epoch = Some(epoch_sk.is_some());
                 
                 // K_s^t <- KEM.Decaps(sk_s,C_s)
-                if is_eq_epoch == Some(true){
+                if let Some(epoch_sk) = &epoch_sk {
+                    debug!("Epochs match");
+                    let epoch_sk = sign::any_supported_type(epoch_sk)
+                        .map_err(|_| TLSError::General("Invalid epoch sk".to_string()))?;
                     // parse again the certificate to get the algorithm
                     let eecrt = webpki::EndEntityCert::from(server_key.cert[0].as_ref()).unwrap();
-                    self.handshake.print_runtime("PDK 1RTT-KEMTLS DECAPSULATING FROM CERTIFICATE");
+                    self.handshake.print_runtime("PDK 1RTT-KEMTLS DECAPSULATING FROM SEMISTATIC");
                     let cipher: &[u8] = &pdk_kemtls.ciphertext.0;
                     let ss = eecrt
-                            .decapsulate(sess.config.key_1rtt.get_bytes(),cipher)
+                            .decapsulate(epoch_sk.get_bytes(), cipher)
                             .unwrap();
-                    self.handshake.print_runtime("PDK 1RTT-KEMTLS DECAPSULATED FROM CERTIFICATE");
+                    self.handshake.print_runtime("PDK 1RTT-KEMTLS DECAPSULATED FROM SEMISTATIC");
                     proactive_semi_static_shared_secret = Some(ss);                   
+                } else {
+                    debug!("epochs do not match");
                 }
             };
         };
@@ -743,9 +795,9 @@ impl CompleteClientHelloHandling {
 
         let mut handshake_secret = None;
         
-        // if 1RTT-KEMTLS epochs are equals or if we are not doing 1RTT-KEMTLS
+        // if 1RTT-KEMTLS epochs *are equals* or if we are not doing 1RTT-KEMTLS
         // Then proceed with KeyScheduling
-        if !(Some(false)== is_eq_epoch){
+        if is_eq_epoch.is_none() || is_eq_epoch == Some(true) {
             if let Some(ref ks) = maybe_key_schedule {
                 // Continue the Key Scheduling depending on whether it is the 
                 // semi-static 1RTT-KEMTLS or the normal KEMTLS 
@@ -766,8 +818,8 @@ impl CompleteClientHelloHandling {
                                                                 &self.handshake.randoms.client);
                     self.handshake.print_runtime("CREATED HS");
                     handshake_secret = Some(hs);
-                    chts                
-                }else{
+                    chts
+                } else {
                     ks.client_early_traffic_secret(
                         &self.handshake.transcript.get_current_hash(), 
                         &*sess.config.key_log, 
@@ -778,8 +830,8 @@ impl CompleteClientHelloHandling {
                         .set_message_decrypter(cipher::new_tls13_read(suite, &read_key));      
             }
         }
-        
-        if pdk_client_auth {
+
+        if pdk_client_auth || is_eq_epoch.is_some() {
             Ok(Box::new(ExpectPDKCertificate {
                 expect_hello: self,
                 client_hello: client_hello.to_owned(),
@@ -795,6 +847,7 @@ impl CompleteClientHelloHandling {
                 full_handshake,
                 doing_pdk,
                 sigschemes_ext,
+                second_try: false,
             }))
         } else {
             self.complete_handle_client_hello(sess,
@@ -819,7 +872,7 @@ impl CompleteClientHelloHandling {
         &mut self, sess: &mut ServerSessionImpl,
         handshake_secret: &mut KeyScheduleHandshake,
         ss_ephemeral: &[u8], ss_client: &[u8],
-    ){
+    ) -> Result<(), TLSError> {
         let handshake = &self.handshake;
         handshake.print_runtime("DERIVING MS");
         handshake_secret
@@ -849,108 +902,57 @@ impl CompleteClientHelloHandling {
         sess.common
                 .record_layer
                 .set_message_decrypter(cipher::new_tls13_read(suite, &read_key));
-        
+
         handshake.print_runtime("DERIVED MS");
+        Ok(())
     }
 
+
     pub fn complete_handle_client_hello(mut self,
-                sess: &mut ServerSessionImpl,
-                mut server_key: sign::CertifiedKey,
-                client_hello: &ClientHelloPayload,
-                key_schedule_early: Option<KeyScheduleEarly>,
-                handshake_secret:Option<KeyScheduleHandshake>,
-                is_eq_epoch: Option<bool>,
-                chosen_share: &KeyShareEntry,
-                chosen_psk_index: Option<usize>,
-                resumedata: Option<persist::ServerSessionValue>,
-                proactive_ss_certificate_hash: Option<PayloadU8>,
-                pdk_client_auth: bool,
-                full_handshake: bool,
-                doing_pdk: bool,
-                sigschemes_ext: Vec<SignatureScheme>,
-                cert: Option<ClientCertDetails>,
-            ) -> hs::NextStateOrError {        
+        sess: &mut ServerSessionImpl,
+        mut server_key: sign::CertifiedKey,
+        client_hello: &ClientHelloPayload,
+        key_schedule_early: Option<KeyScheduleEarly>,
+        handshake_secret: Option<KeyScheduleHandshake>, // set for PDK-SS with matching epochs
+        is_eq_epoch: Option<bool>,
+        chosen_share: &KeyShareEntry,
+        chosen_psk_index: Option<usize>,
+        resumedata: Option<persist::ServerSessionValue>,
+        proactive_ss_certificate_hash: Option<PayloadU8>,
+        pdk_client_auth: bool,
+        full_handshake: bool,
+        doing_pdk: bool,
+        sigschemes_ext: Vec<SignatureScheme>,
+        cert: Option<ClientCertDetails>,
+    ) -> hs::NextStateOrError {
+        if handshake_secret.is_none() { debug_assert!(!is_eq_epoch.unwrap_or(false)); }
+        if handshake_secret.is_some() { debug_assert!(is_eq_epoch.unwrap(), "this should be true?"); }
+
         // split
-        // These extensions are meant for the 1RTT-KEMTLS protocol hello_server
-        let mut extensions = Vec::new();
-        let is_ssrttkemtls =  handshake_secret.is_some();
-        let mut ss_ephemeral = Vec::new();
+        let key_schedule = self.emit_server_hello(
+            sess, &client_hello.session_id,
+            chosen_share, chosen_psk_index,
+            resumedata.as_ref().map(|x| &x.master_secret.0[..]),
+            proactive_ss_certificate_hash,
+            key_schedule_early,
+            handshake_secret,
+            is_eq_epoch.unwrap_or(false),
+            &cert,
+        )?;
+        // ccs is emitted by emit_server_hello
 
-        // check if it's semi-static 1RTT-KEMTLS (with equal epoch) or not
-        let mut key_schedule = if !is_ssrttkemtls {
-            self.emit_server_hello(sess, &client_hello.session_id,
-                chosen_share, chosen_psk_index,
-                resumedata.as_ref().map(|x| &x.master_secret.0[..]),
-                proactive_ss_certificate_hash,
-                key_schedule_early,
-              )?
-        } else {
-            // Do key exchange
-            self.handshake.print_runtime("ENCAPSULATING TO EPHEMERAL");
-            //kxr contains ciphertext: Vec<u8>,  pub shared_secret: Vec<u8>,
-            let kxr = suites::KeyExchange::encapsulate(chosen_share.group,&chosen_share.payload.0)
-                .ok_or_else(|| TLSError::PeerMisbehavedError("key exchange failed".to_string()))?;
-            self.handshake.print_runtime("ENCAPSULATED TO EPHEMERAL");            
-            ss_ephemeral = kxr.shared_secret.to_vec();
-            let kse = KeyShareEntry::new(chosen_share.group, kxr.ciphertext.as_ref());
-            extensions.push(ServerExtension::KeyShare(kse));
-            extensions.push(ServerExtension::SupportedVersions(ProtocolVersion::TLSv1_3));
-    
-            if let Some(psk_idx) = chosen_psk_index {
-                extensions.push(ServerExtension::PresharedKey(psk_idx as u16));
-            }
-    
-            if let Some(cert_hash) = proactive_ss_certificate_hash {
-                extensions.push(ServerExtension::ProactiveCiphertextAccepted(cert_hash));
-            }    
-            handshake_secret.unwrap()
-        };
-
-
-        if !self.done_retry && !is_ssrttkemtls {
-             self.emit_fake_ccs(sess);
+        if is_eq_epoch.is_some() {
+            self.maybe_emit_server_public_key(sess)?;
         }
+        self.emit_encrypted_extensions(sess, &mut server_key, client_hello, resumedata.as_ref(), doing_pdk)?;
 
-        // 1RTT-KEMTLS with not equal epoch
-        if Some(false) == is_eq_epoch{
-            // Emit {SPK:= ServerPublicKey}
-            let pk_filename = "../../certificates/1RTT-KEMTLS/new_kem_ssrttkemtls.pub";
-            self.emit_server_public_key(sess, pk_filename)?;
-            self.emit_encrypted_extensions(sess, &mut server_key, client_hello, resumedata.as_ref(), doing_pdk)?;
-            sess.config.verifier.client_auth_mandatory(sess.get_sni())
-                .ok_or_else(|| {
-                    debug!("could not determine if client auth is mandatory based on SNI");
-                    sess.common.send_fatal_alert(AlertDescription::AccessDenied);
-                    TLSError::General("client rejected by client_auth_mandatory".into())
-                })?;
-
-            return Ok(self.into_expect_pdk_certificate(client_hello,
-                                                        server_key,
-                                                        key_schedule,
-                                                        chosen_share,
-                                                        chosen_psk_index,
-                                                        resumedata,
-                                                        pdk_client_auth,
-                                                        full_handshake,
-                                                        doing_pdk,
-                                                        sigschemes_ext,
-                                                    ))
-        };
-
-        if !is_ssrttkemtls{
-            // if we are not doing 1RTT-KEMTLS with equal epochs
-            // then send encrypted extensions now
-            self.emit_encrypted_extensions(sess, &mut server_key, client_hello, resumedata.as_ref(), doing_pdk)?;
-        };
-
-        // starting KEMTLS or 1RTT-KEMTLS with equal epochs
         let (doing_client_auth, is_kemtls) = if full_handshake {
             let client_auth;
             let is_kemtls = if !doing_pdk {
                 client_auth = self.emit_certificate_req_tls13(sess)?;
                 self.emit_certificate_tls13(sess, &mut server_key);            // determine if kemtls
                 webpki::EndEntityCert::from(&server_key.end_entity_cert().unwrap().0)
-                    .map(|crt| crt.is_kem_cert(),)
+                    .map(|crt| crt.is_kem_cert())
                     .map_err(|e| TLSError::WebPKIError(e))?
             } else {
                 client_auth = pdk_client_auth;
@@ -968,8 +970,8 @@ impl CompleteClientHelloHandling {
             Ok(self.into_expect_ciphertext(key_schedule, server_key, doing_client_auth))
         } else if is_kemtls && doing_pdk {
             hs::check_aligned_handshake(sess)?;
-
-            if doing_client_auth {
+            // KEMTLS-PDK (no semistatic handling of client auth)
+            if doing_client_auth && is_eq_epoch.is_none() {
                 let mandatory = sess.config.verifier.client_auth_mandatory(sess.get_sni())
                 .ok_or_else(|| {
                     debug!("could not determine if client auth is mandatory based on SNI");
@@ -980,77 +982,46 @@ impl CompleteClientHelloHandling {
                     sess.common.send_fatal_alert(AlertDescription::CertificateRequired);
                     return Err(TLSError::NoCertificatesPresented);
                 }
-
                 let cert = cert.unwrap();
                 // emit ciphertext XXX copied from ExpectCertificate.emit_ciphertext
                 let certificate = webpki::EndEntityCert::from(&cert.cert_chain[0].0)
                     .map_err(TLSError::WebPKIError)?;
-
                 self.handshake.print_runtime("PDK ENCAPSULATING TO CCERT");
                 let (ct, ss) = certificate.encapsulate().map_err(|_| TLSError::DecryptError)?;
                 self.handshake.print_runtime("PDK ENCAPSULATED TO CCERT");
-                let ct_client = ct.into_vec();
+                let m = Message {
+                    typ: ContentType::Handshake,
+                    version: ProtocolVersion::TLSv1_3,
+                    payload: MessagePayload::Handshake(HandshakeMessagePayload {
+                        typ: HandshakeType::ClientKemCiphertext,
+                        payload: HandshakePayload::ClientKemCiphertext(Payload::new(ct.into_vec())),
+                    }),
+                };
+                self.handshake.transcript.add_message(&m);
+                sess.common.send_msg(m, true);
 
-                // split between 1RTT-KEMTLS and semi-static 1RTT-KEMTLS                
-                if !is_ssrttkemtls {
-                    // continue with normal 1RTT-KEMTLS
-                    let m = Message {
-                        typ: ContentType::Handshake,
-                        version: ProtocolVersion::TLSv1_3,
-                        payload: MessagePayload::Handshake(HandshakeMessagePayload {
-                            typ: HandshakeType::ClientKemCiphertext,
-                            payload: HandshakePayload::ClientKemCiphertext(Payload::new(ct_client)),
-                        }),
-                    };
-                    self.handshake.transcript.add_message(&m);
-                    sess.common.send_msg(m, true);
-                } else {
-                    // do the semi-static 1RTT-KEMTLS
-                    let payload = PayloadU16::new(ct_client);
-                    extensions.push(ServerExtension::ProactiveCiphertextKEMTLSAccepted(payload));
-
-                    let sh = Message{
-                        typ: ContentType::Handshake,
-                        version: ProtocolVersion::TLSv1_2,
-                        payload: MessagePayload::Handshake(HandshakeMessagePayload {
-                            typ: HandshakeType::ServerHello,
-                            payload: HandshakePayload::ServerHello(ServerHelloPayload {
-                                legacy_version: ProtocolVersion::TLSv1_2,
-                                random: Random::from_slice(&self.handshake.randoms.server),
-                                session_id: client_hello.session_id,
-                                cipher_suite: sess.common.get_suite_assert().suite,
-                                compression_method: Compression::Null,
-                                extensions,
-                            }),
-                        }),
-                    };
-
-                    #[cfg(feature = "quic")]
-                    trace!("sending server hello {:?}", sh);
-                    self.handshake.transcript.add_message(&sh);
-                    sess.common.send_msg(sh, false);
-                    self.handshake.print_runtime("EMITTED SH");
-                    self.emit_fake_ccs(sess);
-
-                    // continue the key scheduling
-                    // to be added {SPK:= ServerPublicKey}*_SAHTS : t+1, pk_s^{t+1}
-                    self.prepare_finished_ssrttkemtls_eq_epoch(
-                        sess, &mut key_schedule,
-                        &ss_ephemeral, &ss.clone().into_vec(),
-                        );
-
-                    // simon: this needs to be changed (hardcoded certificate and timelap boolean propagation)
-                    let is_update_client = true;
-                    if is_update_client {
-                        let pk_filename = "../../certificates/1RTT-KEMTLS/new_kem_ssrttkemtls.pub";
-                        self.emit_server_public_key(sess, pk_filename)?;
-                    }
-
-                    //{EE := EncryptedExtensions}_SAHTS
-                    self.emit_encrypted_extensions(sess, &mut server_key, client_hello, resumedata.as_ref(), doing_pdk)?;
-                }
-                // {ServerFinished}_SAHTS : SF <- HMAC(fk_s, H(CH..SF))
                 let ks = emit_finished_kemtlspdk(&mut self.handshake, sess, key_schedule, Some(ss.as_ref()));
+                Ok(self.into_expect_finished(ks, true))
+            } else if is_eq_epoch == Some(false) { // unequal epochs
+                debug_assert!(doing_client_auth);
+                Ok(self.into_expect_pdk_certificate(
+                    client_hello, 
+                    server_key, 
+                    key_schedule, 
+                    chosen_share, 
+                    chosen_psk_index, 
+                    resumedata, 
+                    pdk_client_auth, 
+                    full_handshake, 
+                    doing_pdk, 
+                    sigschemes_ext,
+                    is_eq_epoch,
+                    true
+                ))
+            }else if is_eq_epoch.unwrap_or(false) { // equal epochs
+                debug_assert!(doing_client_auth);
+                // client auth for PDK-SS is handled elsewhere; we need to transition to finished.
+                let ks = emit_finished_kemtlspdk(&mut self.handshake, sess, key_schedule, None);
                 Ok(self.into_expect_finished(ks, true))
             } else {
                 trace!("Not doing client auth with PDK ");
@@ -1069,7 +1040,7 @@ impl CompleteClientHelloHandling {
                 Ok(self.into_expect_finished(key_schedule_traffic, false))
             }
         }
-    }
+        }
 }
 
 trait KeySchedulingEarlyHandshake {}
@@ -1093,6 +1064,7 @@ struct ExpectPDKCertificate {
     full_handshake: bool,
     doing_pdk: bool,
     sigschemes_ext: Vec<SignatureScheme>,
+    second_try: bool,
 }
 
 impl ExpectPDKCertificate {
@@ -1109,7 +1081,7 @@ impl ExpectPDKCertificate {
         })
     }
 
-    fn finish_handle_clienthello(self, sess: &mut ServerSessionImpl, cert: ClientCertDetails) -> hs::NextStateOrError {
+    fn finish_handle_clienthello(self, sess: &mut ServerSessionImpl, cert: Option<ClientCertDetails>) -> hs::NextStateOrError {
         self.expect_hello.complete_handle_client_hello(
             sess,
             self.server_key, 
@@ -1125,7 +1097,7 @@ impl ExpectPDKCertificate {
             self.full_handshake, 
             self.doing_pdk,
             self.sigschemes_ext,
-            Some(cert),
+            cert,
         )
     }
 
@@ -1156,31 +1128,16 @@ impl ExpectPDKCertificate {
 
 impl hs::State for ExpectPDKCertificate {
     fn handle(mut self: Box<Self>, sess: &mut ServerSessionImpl, m: Message) -> hs::NextStateOrError {
-        // if it is 1RTT-KEMTLS with non-equal epochs
-        if self.is_eq_epoch == Some(false){
-            return self.expect_hello.complete_handle_client_hello(
-                sess,
-                self.server_key, 
-                &self.client_hello, 
-                self.key_schedule_early,
-                self.handshake_secret,
-                self.is_eq_epoch,
-                &self.chosen_share, 
-                self.chosen_psk_index, 
-                self.resumedata,
-                self.proactive_ss_certificate_hash, 
-                self.pdk_client_auth, 
-                self.full_handshake, 
-                self.doing_pdk,
-                self.sigschemes_ext,
-                None,
-            )
+        let certp = require_handshake_msg!(m, HandshakeType::Certificate, HandshakePayload::CertificateTLS13);
+        if self.is_eq_epoch == Some(false) && !self.second_try {
+            trace!("Received PDK certificate that we can't decrypt.");
+            return self.finish_handle_clienthello(sess, None);
         }
-        let certp = require_handshake_msg!(m, HandshakeType::Certificate, HandshakePayload::CertificateTLS13)?;
+        let certp = certp.unwrap();
         trace!("Received PDK certificate");
 
         // add message to transcript only when it it is not 1RTT-KEMTLS
-        if sess.config.epoch_1rtt.is_none(){
+        if sess.ssrtt_client_epoch.is_none(){
             self.expect_hello.handshake.transcript.add_message(&m);
         }
 
@@ -1207,7 +1164,7 @@ impl hs::State for ExpectPDKCertificate {
         let cert = ClientCertDetails::new(cert_chain);
         
         // Try to figure out when we are talking about 1RTT-KEMTLS in two round trip version
-        if self.is_eq_epoch.is_none() && self.handshake_secret.is_some(){
+        if self.second_try {
             // simon: to be checked carefully if this is the optimal way to do it
             // simon: should I check hs::check_aligned_handshake(sess)?;
             let ss = self.emit_ciphertext(sess,cert)?;
@@ -1216,14 +1173,16 @@ impl hs::State for ExpectPDKCertificate {
                                                         sess,
                                                         self.handshake_secret.unwrap(),
                                                         &ss.into_vec());
-            return Ok(ExpectPDKCertificate::into_expect_finished(
+            Ok(ExpectPDKCertificate::into_expect_finished(
                 self.expect_hello.handshake,
                 finished_pending,
                 self.expect_hello.send_ticket,
                 true))
 
-        };
-        self.finish_handle_clienthello(sess, cert)
+        } else {
+            // otherwise we still need to wrap up the clienthello?
+            self.finish_handle_clienthello(sess, Some(cert))
+        }
     }
 }
 
@@ -1297,7 +1256,7 @@ fn emit_finished_kemtlspdk(
     ss: Option<&[u8]>
 ) -> KeyScheduleTrafficWithClientFinishedPending {
     let handshake_hash = handshake.transcript.get_current_hash();
-    let mut key_schedule = if sess.config.epoch_1rtt.is_none(){
+    let mut key_schedule = if sess.ssrtt_client_epoch.is_none(){
         key_schedule.into_kemtlspdk_traffic_with_client_finished_pending(ss)
     } else {
         key_schedule.into_ssrttkemtls_traffic_with_client_finished_pending()
@@ -1384,8 +1343,8 @@ impl hs::State for ExpectCiphertext {
         // decapsulate
         let ciphertext = &ctmsg.0;
         let eecrt = self.server_key.end_entity_cert()
-        .map_err(|_| TLSError::NoCertificatesPresented)
-        .and_then(|crt| webpki::EndEntityCert::from(&crt.0).map_err(TLSError::WebPKIError))?;
+            .map_err(|_| TLSError::NoCertificatesPresented)
+            .and_then(|crt| webpki::EndEntityCert::from(&crt.0).map_err(TLSError::WebPKIError))?;
 
         self.handshake.print_runtime("DECAPSULATING FROM CERTIFICATE");
         let ss = eecrt.decapsulate(self.server_key.key.get_bytes(), ciphertext).map_err(TLSError::WebPKIError)?;
