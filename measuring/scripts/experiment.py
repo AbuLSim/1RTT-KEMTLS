@@ -23,9 +23,9 @@ import sys
 # Original set of latencies
 #LATENCIES = ['2.684ms', '15.458ms', '39.224ms', '97.73ms']
 #LATENCIES = ["2.0ms"]
-LATENCIES = ['15.458ms'] #, '97.73ms'] #['2.684ms', '15.458ms', '97.73ms']  #['15.458ms', '97.73ms']
+LATENCIES = ['15.458ms', '97.73ms'] #['2.684ms', '15.458ms', '97.73ms']  #['15.458ms', '97.73ms']
 LOSS_RATES = [0]     #[ 0.1, 0.5, 1, 1.5, 2, 2.5, 3] + list(range(4, 21)):
-NUM_PINGS = 2 # for measuring the practical latency
+NUM_PINGS = 10 # for measuring the practical latency
 #SPEEDS = [1000, 10]
 SPEEDS = [1000, 10]
 
@@ -35,8 +35,8 @@ ITERATIONS = 1
 POOL_SIZE = 36
 START_PORT = 10000
 SERVER_PORTS = [str(port) for port in range(10000, 10000+POOL_SIZE)]
-MEASUREMENTS_PER_PROCESS = 100
-MEASUREMENTS_PER_CLIENT = 100
+MEASUREMENTS_PER_PROCESS = 200
+MEASUREMENTS_PER_CLIENT = 200
 
 ###################################################################################################
 
@@ -111,6 +111,14 @@ ALGORITHMS = [
     Experiment('sign', "SikeP434Compressed", "Falcon512", "RainbowICircumzenithal", "RainbowICircumzenithal"),
     #Experiment('sign', "SikeP434Compressed", "Falcon512", "RainbowIClassic", "RainbowIClassic"),
     Experiment('sign', "NtruHps2048509", "Falcon512", "Falcon512", "Falcon512"),
+    #   with client auth
+    Experiment('sign', "Kyber512", "Dilithium2", "Dilithium2", "Dilithium2", "Dilithium2", "Dilithium2"),
+    #Experiment('sign', "SikeP434Compressed", "Falcon512", "XMSS", "Gemss128"),
+    #Experiment('sign', "SikeP434Compressed", "Falcon512", "Gemss128", "Gemss128"),
+    Experiment('sign', "SikeP434Compressed", "Falcon512", "XMSS", "RainbowICircumzenithal", "Falcon512", "RainbowICircumzenithal"),
+    Experiment('sign', "SikeP434Compressed", "Falcon512", "RainbowICircumzenithal", "RainbowICircumzenithal", "Falcon512", "RainbowICircumzenithal"),
+    #Experiment('sign', "SikeP434Compressed", "Falcon512", "RainbowIClassic", "RainbowIClassic"),
+    Experiment('sign', "NtruHps2048509", "Falcon512", "Falcon512", "Falcon512", "Falcon512", "Falcon512"),
     #  KEMTLS
     Experiment('kemtls', "Kyber512", "Kyber512", "Dilithium2", "Dilithium2"),
     #Experiment('kemtls', "SikeP434Compressed", "SikeP434Compressed", "XMSS", "Gemss128"),
