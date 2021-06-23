@@ -190,6 +190,7 @@ ALGORITHMS = [
             #("SikeP434", "SikeP434", "RainbowIClassic"),
             # Minimal Finalist
             #("NtruHps2048509", "NtruHps2048509", "RainbowIClassic"),
+            ("SikeP434", "SikeP434", "RainbowIClassic"),
             # Minimal
             ("SikeP434Compressed", "SikeP434Compressed", "RainbowIClassic"),
         ] for exptype in ["pdk", "pdkss", "pdkss-async", "pdkss-update"]
@@ -701,6 +702,10 @@ if __name__ == "__main__":
         ALGORITHMS = filter(lambda x: x.client_auth == client_auth, ALGORITHMS)
     if (client_ca := os.environ.get("CLIENT_CA")) is not None:
         ALGORITHMS = filter(lambda x: x.client_ca == client_ca, ALGORITHMS)
+
+    # Client auth only
+    ALGORITHMS = filter(lambda x: x.client_auth is not None, ALGORITHMS)
+
     ALGORITHMS = list(ALGORITHMS)
 
     if len(sys.argv) < 2 or sys.argv[1] != "full":
