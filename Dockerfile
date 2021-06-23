@@ -110,6 +110,7 @@ COPY --from=builder /usr/src/pqtls/rustls/target/release/examples/tlsclient /usr
 COPY --from=builder /usr/src/pqtls/mk-cert/*.crt /certs/
 COPY --from=builder /usr/src/pqtls/mk-cert/*.key /certs/
 COPY --from=builder /usr/src/pqtls/mk-cert/*.pub /certs/
+COPY --from=builder /usr/src/pqtls/mk-cert/*.epoch /certs/
 
 WORKDIR /certs
 CMD ["echo", "Run tls{server,client} for the rustls-mio server/client with KEX:", $KEX_ALG]

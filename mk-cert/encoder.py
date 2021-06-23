@@ -358,9 +358,9 @@ def write_tbs_certificate(
 def generate_epoch_keys(pk_algorithm, epoch: bytes, filename):
     filename = filename.lower()
     set_up_algorithm(pk_algorithm, "kem")
-    (pk, sk) = get_keys(type, pk_algorithm)
+    (pk, sk) = get_keys("kem", pk_algorithm)
     write_pem(f"{filename}.pub", b"PUBLIC KEY", public_key_der(pk_algorithm, pk))
-    write_pem(f"{filename}.key", b"PRIVATE KEY", sk)
+    write_pem(f"{filename}.key", b"PRIVATE KEY", private_key_der(pk_algorithm, sk))
     write_pem(f"{filename}.epoch", b"EPOCH", epoch)
 
 

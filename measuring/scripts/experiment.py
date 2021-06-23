@@ -23,20 +23,20 @@ import sys
 # Original set of latencies
 #LATENCIES = ['2.684ms', '15.458ms', '39.224ms', '97.73ms']
 #LATENCIES = ["2.0ms"]
-LATENCIES = ['15.458ms', '97.73ms'] #['2.684ms', '15.458ms', '97.73ms']  #['15.458ms', '97.73ms']
+LATENCIES = ['15.458ms'] #, '97.73ms'] #['2.684ms', '15.458ms', '97.73ms']  #['15.458ms', '97.73ms']
 LOSS_RATES = [0]     #[ 0.1, 0.5, 1, 1.5, 2, 2.5, 3] + list(range(4, 21)):
-NUM_PINGS = 10  # for measuring the practical latency
+NUM_PINGS = 2 # for measuring the practical latency
 #SPEEDS = [1000, 10]
 SPEEDS = [1000, 10]
 
 # xvzcf's experiment used POOL_SIZE = 40
 # We start as many servers as clients, so make sure to adjust accordingly
-ITERATIONS = 2
-POOL_SIZE = 40
+ITERATIONS = 1
+POOL_SIZE = 36
 START_PORT = 10000
 SERVER_PORTS = [str(port) for port in range(10000, 10000+POOL_SIZE)]
-MEASUREMENTS_PER_PROCESS = 500
-MEASUREMENTS_PER_CLIENT = 500
+MEASUREMENTS_PER_PROCESS = 100
+MEASUREMENTS_PER_CLIENT = 100
 
 ###################################################################################################
 
@@ -233,7 +233,7 @@ def only_unique_experiments() -> None:
         return exp
     ALGORITHMS = [update(exp) for exp in ALGORITHMS if (exp.type, exp.client_auth is None) not in seen]
 
-TIMER_REGEX = re.compile(r"(?P<label>[A-Z ]+): (?P<timing>\d+) ns")
+TIMER_REGEX = re.compile(r"(?P<label>[A-Z0-9- ]+): (?P<timing>\d+) ns")
 
 
 def run_subprocess(command, working_dir=".", expected_returncode=0) -> str:
@@ -282,7 +282,7 @@ class ServerProcess(multiprocessing.Process):
         if type == "sign" or type == "sign-cached":
             self.certname = "signing" + (".chain" if not cached_int else "") + ".crt"
             self.keyname = "signing.key"
-        elif type in ("kemtls", "pdk", "pdkss"):
+        elif type in ("kemtls", "pdk") or type.startswith("pdkss"):
             self.certname = "kem" + (".chain" if not cached_int else "") + ".crt"
             self.keyname = "kem.key"
         else:
@@ -379,7 +379,7 @@ def run_measurement(output_queue, port, experiment: Experiment, cached_int):
     type = experiment.type
     if type == "sign" or type == "sign-cached":
         caname = "signing" + ("-int" if cached_int else "-ca") + ".crt"
-    elif type in ("kemtls", "pdk", "pdkss"):
+    elif type in ("kemtls", "pdk") or type.startswith("pdkss"):
         caname = "kem" + ("-int" if cached_int else "-ca") + ".crt"
     else:
         logger.error("Unknown experiment type=%s", type)
@@ -392,9 +392,9 @@ def run_measurement(output_queue, port, experiment: Experiment, cached_int):
     if type.startswith("pdk"):
         cache_args = ["--cached-certs", "kem.crt"]
         if type in ("pdkss", "pdkss-update"):
-            cache_args += ["--1rtt-pk", "semistatic-epoch-1.pub", "--1rtt-epoch", "semistatic-epoch-1.epoch"]
+            cache_args += ["--1rtt-pk", "semistatic-epoch-1.pub", "--1rtt-epoch", "semistatic-epoch-1.epoch", "--1rtt-nocommit"]
         elif type == "pdkss-async":
-            cache_args += ["--1rtt-pk", "semistatic-epoch-2.pub", "--1rtt-epoch", "semistatic-epoch-2.epoch"]
+            cache_args += ["--1rtt-pk", "semistatic-epoch-2.pub", "--1rtt-epoch", "semistatic-epoch-2.epoch", "--1rtt-nocommit"]
     elif type == "sign-cached":
         if not cached_int:
             cache_args = ["--cached-certs", "signing.all.crt"]
@@ -404,7 +404,8 @@ def run_measurement(output_queue, port, experiment: Experiment, cached_int):
     if experiment.client_auth is not None:
         clientauthopts = ["--auth-certs", "client.crt", "--auth-key", "client.key"]
     while len(client_measurements) < MEASUREMENTS_PER_PROCESS and server.is_alive() and restarts < allowed_restarts:
-        logger.debug(f"Starting measurements on port {port}")
+        remaining = MEASUREMENTS_PER_PROCESS - len(client_measurements)
+        logger.debug(f"Starting measurements on port {port} ({remaining} remaining)")
         cmd = [
             "ip", "netns", "exec", "cli_ns",
             f"./{clientname}",
@@ -626,7 +627,7 @@ def get_experiment_path(exp: Experiment) -> Path:
 def main():
     os.makedirs("data", exist_ok=True)
     os.chown("data", uid=USERID, gid=GROUPID)
-    for (type, caching) in itertools.product(["kemtls", "sign", "sign-cached", "pdk"], ["int-chain", "int-only"]):
+    for (type, caching) in itertools.product(["kemtls", "sign", "sign-cached", "pdk", "pdkss", "pdkss-update", "pdkss-async"], ["int-chain", "int-only"]):
         dirname = SCRIPTDIR.parent / "data" / f"{type}-{caching}"
         os.makedirs(dirname, exist_ok=True)
         os.chown(dirname, uid=1001, gid=1001)
@@ -643,7 +644,7 @@ def main():
             else:
                 rate = 10
             (type, kex_alg, leaf, intermediate, root, client_auth, client_ca) = experiment
-            if type in ("pdk", "sign-cached") and not int_only:
+            if (type == "sign-cached" or type.startswith("pdk")) and not int_only:
                 # Skip PDK variants like KKDD, they don't make sense as the cert isn't sent.
                 continue
             experiment = get_experiment_instantiation(experiment)
@@ -667,7 +668,7 @@ def main():
             for _ in range(ITERATIONS):
                 result += experiment_run_timers(experiment, int_only)
             duration = datetime.datetime.utcnow() - start_time
-            logger.info("took %s", duration)
+            logger.info("Experiment completed in %s", duration)
 
             with open(fngetter("csv"), "w+") as outresult, open(fngetter("cmdline"), "w+") as outlog:
                 write_result(outresult, outlog, result)
@@ -710,6 +711,9 @@ if __name__ == "__main__":
     logger.info("KEMTLS experiments: {}".format(sum(1 for alg in ALGORITHMS if alg[0] == "kemtls")))
     logger.info("PDK experiments: {}".format(sum(1 for alg in ALGORITHMS if alg[0] == "pdk")))
     logger.info("Sign-cached experiments: {}".format(sum(1 for alg in ALGORITHMS if alg[0] == "sign-cached")))
+    logger.info("PDK-SS experiments (in sync): {}".format(sum(1 for alg in ALGORITHMS if alg[0] == "pdkss")))
+    logger.info("PDK-SS experiments (not in sync): {}".format(sum(1 for alg in ALGORITHMS if alg[0] == "pdkss-async")))
+    logger.info("PDK-SS experiments (in sync, update): {}".format(sum(1 for alg in ALGORITHMS if alg[0] == "pdkss-update")))
 
     setup_experiments()
     hostname = reverse_resolve_hostname()
