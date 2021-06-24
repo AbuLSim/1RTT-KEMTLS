@@ -603,6 +603,8 @@ impl CompleteClientHelloHandling {
         }
     }
 
+    /// Take in the clienthello message.
+    /// For KEMTLS-PDK / PDK-SS it has split logic, as the server needs to receive a certificate message before replying.
     pub fn handle_client_hello(mut self,
                                sess: &mut ServerSessionImpl,
                                server_key: sign::CertifiedKey,
@@ -1163,8 +1165,6 @@ impl hs::State for ExpectPDKCertificate {
         
         // Try to figure out when we are talking about 1RTT-KEMTLS in two round trip version
         if self.second_try {
-            // simon: to be checked carefully if this is the optimal way to do it
-            // simon: should I check hs::check_aligned_handshake(sess)?;
             let ss = self.emit_ciphertext(sess,cert)?;
             let finished_pending = emit_finished_non_eq_epoch_rttkemtls_finished(
                                                         &mut self.expect_hello.handshake,
