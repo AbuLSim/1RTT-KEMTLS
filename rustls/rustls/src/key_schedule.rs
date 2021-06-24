@@ -589,7 +589,6 @@ impl KeySchedule {
         T: for<'a> From<hkdf::Okm<'a, L>>,
         L: hkdf::KeyType,
     {
-        println!("SecretKind: {:?}",kind);
         hkdf_expand(&self.current, key_type, kind.to_bytes(), hs_hash)
     }
 

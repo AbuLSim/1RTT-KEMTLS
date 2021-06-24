@@ -20,7 +20,9 @@ KEX_RENAMES = {
     "SikeP434Compressed": "Sc",
 }
 
-SIG_RENAMES = dict()
+SIG_RENAMES = {
+    "RainbowICircumzenithal": "Rcz",
+}
 
 #: Renames for the leaf algorithm: combination of signature schemes and KEX
 AUTH_RENAMES = dict()
@@ -37,8 +39,12 @@ def get_experiment_name(experiment):
     clca = experiment["clca"]
 
     type = ""
-    if experiment["type"] == "pdk":
-        type = "pdk"
+    if experiment["type"] in ("pdk", "pdkss"):
+        type = experiment["type"]
+    elif experiment["type"] == "pdkss-async":
+        type = "pdkssasync"
+    elif experiment["type"] == "pdkss-update":
+        type = "pdkssupdate"
     elif experiment["type"] == "kemtls":
         type = "kemtls"
     elif experiment["type"] == "sign-cached":
@@ -49,13 +55,13 @@ def get_experiment_name(experiment):
 
     kex = KEX_RENAMES.get(kex, kex[0].upper())
     leaf = AUTH_RENAMES.get(leaf, leaf[0].upper())
-    if inter is not None and type not in ("pdk", "sigcache"):
+    if inter is not None and not (type == "sigcache" or type.startswith("pdk")):
         inter = SIG_RENAMES.get(inter, inter[0].upper())
-    elif inter is None or type in ("pdk", "sigcache"):
+    elif inter is None or (type == "sigcache" or type.startswith("pdk")):
         inter = ""
-    if root is not None and type != "pdk":
+    if root is not None and not type.startswith("pdk"):
         root = SIG_RENAMES.get(root, root[0].upper())
-    elif root is None or type == "pdk":
+    elif root is None or type.startswith("pdk"):
         root = ""
 
     authpart = ""
@@ -118,6 +124,7 @@ AVG_FIELDS = [
             "creating keyshares",
             "created keyshares",
             "created pdk encapsulation",
+            "created pdk 1rtt-kemtls encapsulation",
             "sending chelo",
             "received sh",
             "decapsulating ephemeral",
@@ -132,6 +139,7 @@ AVG_FIELDS = [
             "decapsulating from ccert",
             "decapsulated from ccert",
             "derived ms",
+            "received spk",
             "emitted finished",
             "received finished",
             "authenticated server",
@@ -151,6 +159,8 @@ AVG_FIELDS = [
             "pdk decapsulating from certificate",
             "pdk decapsulating from certificate",
             "pdk decapsulated from certificate",
+            "pdk 1rtt-kemtls decapsulating from semistatic",
+            "pdk 1rtt-kemtls decapsulated from semistatic",
             "derived hs",
             "pdk encapsulating to ccert",
             "pdk encapsulated to ccert",
@@ -159,10 +169,13 @@ AVG_FIELDS = [
             "received ckex",
             "decapsulating from certificate",
             "decapsulated from certificate",
+            "sent spk",
+            "sent skc",
             "derived ahs",
             "received certificate",
             "encapsulating to client",
             "submitted skex to client",
+            "derived ms",
             "received certv",
             "received finished",
             "authenticated client",
@@ -193,6 +206,7 @@ def format_results_tex(avgs):
 
         texfile.write(macro("clientdone", avgs["client handshake completed"]))
         texfile.write(macro("serverdone", avgs["server handshake completed"]))
+        texfile.write(macro("serverexplicitauthed", avgs.get("client authenticated server", avgs["client received finished"])))
         texfile.write(macro("clientgotreply", avgs["client received server reply"]))
 
 
@@ -229,7 +243,8 @@ def write_averages(experiments):
 
 
 EXPERIMENT_REGEX = re.compile(
-    r"(?P<type>(kemtls|sign|sign-cached|pdk))-(?P<cached>(int-chain|int-only))/"
+    r"(?P<type>(kemtls|sign|sign-cached|pdk|pdkss|pdkss-async|pdkss-update))"
+    r"-(?P<cached>(int-chain|int-only))/"
     r"(?P<kex>[^_]+)_(?P<leaf>[^_]+)_(?P<int>[^_]+)(_(?P<root>[^_]+))?"
     r"(_clauth_(?P<clauth>[^_]+)_(?P<clca>[^_]+))?"
     r"_(?P<rtt>\d+\.\d+)ms_(?P<drop_rate>\d+(\.\d+)?)_(?P<rate>\d+mbit).csv"

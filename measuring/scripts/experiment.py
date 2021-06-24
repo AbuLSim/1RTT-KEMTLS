@@ -25,14 +25,14 @@ import sys
 #LATENCIES = ["2.0ms"]
 LATENCIES = ['15.458ms', '97.73ms'] #['2.684ms', '15.458ms', '97.73ms']  #['15.458ms', '97.73ms']
 LOSS_RATES = [0]     #[ 0.1, 0.5, 1, 1.5, 2, 2.5, 3] + list(range(4, 21)):
-NUM_PINGS = 10  # for measuring the practical latency
+NUM_PINGS = 10 # for measuring the practical latency
 #SPEEDS = [1000, 10]
 SPEEDS = [1000, 10]
 
 # xvzcf's experiment used POOL_SIZE = 40
 # We start as many servers as clients, so make sure to adjust accordingly
-ITERATIONS = 2
-POOL_SIZE = 40
+ITERATIONS = 1
+POOL_SIZE = 36
 START_PORT = 10000
 SERVER_PORTS = [str(port) for port in range(10000, 10000+POOL_SIZE)]
 MEASUREMENTS_PER_PROCESS = 200
@@ -85,7 +85,10 @@ class CustomFormatter(logging.Formatter):
 
 class Experiment(NamedTuple):
     """Represents an experiment"""
-    type: Union[Literal["sign"], Literal["pdk"], Literal["kemtls"], Literal["sign-cached"]]
+    type: Union[
+        Literal["sign"], Literal["pdk"], Literal["kemtls"],
+        Literal["sign-cached"],
+        Literal["pdkss"], Literal["pdkss-async"], Literal["pdkss-update"]]
     kex: str
     leaf: str
     intermediate: Optional[str] = None
@@ -106,16 +109,30 @@ ALGORITHMS = [
     #Experiment('sign', "SikeP434Compressed", "Falcon512", "Gemss128", "Gemss128"),
     Experiment('sign', "SikeP434Compressed", "Falcon512", "XMSS", "RainbowICircumzenithal"),
     Experiment('sign', "SikeP434Compressed", "Falcon512", "RainbowICircumzenithal", "RainbowICircumzenithal"),
+    #Experiment('sign', "SikeP434Compressed", "Falcon512", "RainbowIClassic", "RainbowIClassic"),
     Experiment('sign', "NtruHps2048509", "Falcon512", "Falcon512", "Falcon512"),
+    #   with client auth
+    Experiment('sign', "Kyber512", "Dilithium2", "Dilithium2", "Dilithium2", "Dilithium2", "Dilithium2"),
+    #Experiment('sign', "SikeP434Compressed", "Falcon512", "XMSS", "Gemss128"),
+    #Experiment('sign', "SikeP434Compressed", "Falcon512", "Gemss128", "Gemss128"),
+    Experiment('sign', "SikeP434Compressed", "Falcon512", "XMSS", "RainbowICircumzenithal", "Falcon512", "RainbowICircumzenithal"),
+    Experiment('sign', "SikeP434Compressed", "Falcon512", "RainbowICircumzenithal", "RainbowICircumzenithal", "Falcon512", "RainbowICircumzenithal"),
+    #Experiment('sign', "SikeP434Compressed", "Falcon512", "RainbowIClassic", "RainbowIClassic"),
+    Experiment('sign', "NtruHps2048509", "Falcon512", "Falcon512", "Falcon512", "Falcon512", "Falcon512"),
     #  KEMTLS
     Experiment('kemtls', "Kyber512", "Kyber512", "Dilithium2", "Dilithium2"),
     #Experiment('kemtls', "SikeP434Compressed", "SikeP434Compressed", "XMSS", "Gemss128"),
     #Experiment('kemtls', "SikeP434Compressed", "SikeP434Compressed", "Gemss128", "Gemss128"),
     Experiment('kemtls', "SikeP434Compressed", "SikeP434Compressed", "XMSS", "RainbowICircumzenithal"),
     Experiment('kemtls', "SikeP434Compressed", "SikeP434Compressed", "RainbowICircumzenithal", "RainbowICircumzenithal"),
+    Experiment('kemtls', "SikeP434Compressed", "SikeP434Compressed", "XMSS", "RainbowIClassic"),
+    #Experiment('kemtls', "SikeP434Compressed", "SikeP434Compressed", "RainbowIClassic", "RainbowIClassic"),
     Experiment('kemtls', "NtruHps2048509", "NtruHps2048509", "Falcon512", "Falcon512"),
     #   KEMTLS + CA
     Experiment("kemtls", "Kyber512", "Kyber512", "Dilithium2", "Dilithium2", "Kyber512", "Dilithium2"),
+    Experiment("kemtls", "SikeP434Compressed", "SikeP434Compressed", "XMSS", "RainbowIClassic", "SikeP434Compressed", "RainbowIClassic"),
+    Experiment("kemtls", "NtruHps2048509", "NtruHps2048509", "Falcon512", "Falcon512", "NtruHps2048509", "Falcon512"),
+    Experiment("kemtls", "SikeP434Compressed", "SikeP434Compressed", "RainbowIClassic", "RainbowIClassic", "SikeP434Compressed", "RainbowIClassic"),
     # KEMTLS PDK experiments
     #  TLS with cached certs
     Experiment("sign-cached", "X25519", "RSA2048", "RSA2048"),
@@ -124,8 +141,9 @@ ALGORITHMS = [
         Experiment("sign-cached", kex, sig)
         for kex, sig in [
             ("Kyber512", "Dilithium2"),
-            ("Lightsaber", "Dilithium2"),
+            #("Lightsaber", "Dilithium2"),
             ("NtruHps2048509", "Falcon512"),
+            #("Kyber512", "RainbowIClassic"),
             # Minimal Finalist
             #("NtruHps2048509", "RainbowIClassic"),
             # Minimal
@@ -137,7 +155,7 @@ ALGORITHMS = [
         Experiment("sign-cached", kex, sig, client_auth=clauth, client_ca=clca)
         for kex, sig, clauth, clca in [
             ("Kyber512", "Dilithium2", "Dilithium2", "Dilithium2"),
-            ("Lightsaber", "Dilithium2", "Dilithium2", "Dilithium2"),
+            #("Lightsaber", "Dilithium2", "Dilithium2", "Dilithium2"),
             ("NtruHps2048509", "Falcon512", "Falcon512", "Falcon512"),
             # Minimal Finalist
             #("NtruHps2048509", "RainbowIClassic", "Falcon512", "RainbowIClassic"),
@@ -153,33 +171,44 @@ ALGORITHMS = [
             "Kyber512",
             "Lightsaber",
             "NtruHps2048509",
-            "ClassicMcEliece348864",
-            "Hqc128",
-            "NtruPrimeNtrulpr653",
-            "NtruPrimeSntrup653",
-            "BikeL1Fo",
-            "FrodoKem640Shake",
-            "SikeP434",
+            #"ClassicMcEliece348864",
+            #"Hqc128",
+            #"NtruPrimeNtrulpr653",
+            #"NtruPrimeSntrup653",
+            #"BikeL1Fo",
+            #"FrodoKem640Shake",
+
+            #"SikeP434",
+            # Minimal
             "SikeP434Compressed",
         ]
     ),
     #    With mutual auth
     *(
-        Experiment("pdk", kex, kex, client_auth=clauth, client_ca=clca)
+        Experiment(exptype, kex, kex, client_auth=clauth, client_ca=clca)
         for kex, clauth, clca in [
             ("Kyber512", "Kyber512", "Dilithium2"),
             ("Lightsaber", "Lightsaber", "Dilithium2"),
             ("NtruHps2048509", "NtruHps2048509", "Falcon512"),
+            #("Hqc128", "Hqc128", "RainbowIClassic"),
+            #("NtruPrimeNtrulpr653", "NtruPrimeNtrulpr653", "Falcon512"),
+            #("NtruPrimeSntrup653", "NtruPrimeSntrup653", "Falcon512"),
+            #("BikeL1Fo", "BikeL1Fo", "RainbowIClassic"),
+            #("FrodoKem640Shake", "FrodoKem640Shake", "SphincsSha256128sSimple"),
+            #("SikeP434", "SikeP434", "RainbowIClassic"),
             # Minimal Finalist
             #("NtruHps2048509", "NtruHps2048509", "RainbowIClassic"),
+            ("SikeP434", "SikeP434", "RainbowIClassic"),
             # Minimal
             ("SikeP434Compressed", "SikeP434Compressed", "RainbowIClassic"),
-        ]
+        ] for exptype in ["pdk", "pdkss", "pdkss-async", "pdkss-update"]
     ),
     #   Special combos with McEliece
     *(
-        Experiment("pdk", "ClassicMcEliece348864", kex)
+        Experiment("pdk", kex, leaf="ClassicMcEliece348864")
         for kex in [
+            #"Kyber512",
+            #"Lightsaber",
             # Minimal Finalist
             #"NtruHps2048509",
             # Minimal
@@ -213,7 +242,7 @@ def only_unique_experiments() -> None:
         return exp
     ALGORITHMS = [update(exp) for exp in ALGORITHMS if (exp.type, exp.client_auth is None) not in seen]
 
-TIMER_REGEX = re.compile(r"(?P<label>[A-Z ]+): (?P<timing>\d+) ns")
+TIMER_REGEX = re.compile(r"(?P<label>[A-Z0-9- ]+): (?P<timing>\d+) ns")
 
 
 def run_subprocess(command, working_dir=".", expected_returncode=0) -> str:
@@ -257,19 +286,32 @@ class ServerProcess(multiprocessing.Process):
         self.last_msg = "HANDSHAKE COMPLETED"
         self.servername = "tlsserver"
         self.type = experiment.type
-        self.clientauthopts = []
+        self.extraopts = []
         type = experiment.type
         if type == "sign" or type == "sign-cached":
             self.certname = "signing" + (".chain" if not cached_int else "") + ".crt"
             self.keyname = "signing.key"
-        elif type == "kemtls" or type == "pdk":
+        elif type in ("kemtls", "pdk") or type.startswith("pdkss"):
             self.certname = "kem" + (".chain" if not cached_int else "") + ".crt"
             self.keyname = "kem.key"
         else:
             raise ValueError(f"Invalid Experiment type in {experiment}")
 
+        if type.startswith("pdkss"):
+            self.extraopts += [
+                "--1rtt-key", "semistatic-epoch-1.key",
+                "--1rtt-public", "semistatic-epoch-1.pub",
+                "--1rtt-epoch", "semistatic-epoch-1.epoch"
+            ]
+        if type == "pdkss-update":
+            self.extraopts += [
+                "--1rtt-key-next", "semistatic-epoch-2.key",
+                "--1rtt-public-next", "semistatic-epoch-2.pub",
+                "--1rtt-epoch-next", "semistatic-epoch-2.epoch"
+            ]
+
         if experiment.client_auth is not None:
-            self.clientauthopts = ["--require-auth", "--auth", "client-ca.crt"]
+            self.extraopts += ["--require-auth", "--auth", "client-ca.crt"]
 
     def run(self):
         cmd = [
@@ -278,7 +320,7 @@ class ServerProcess(multiprocessing.Process):
             "--certs", self.certname,
             "--key", self.keyname,
             "--port", self.port,
-            *self.clientauthopts,
+            *self.extraopts,
             "http",
         ]
         logger.debug("Server cmd: %s", ' '.join(cmd))
@@ -346,7 +388,7 @@ def run_measurement(output_queue, port, experiment: Experiment, cached_int):
     type = experiment.type
     if type == "sign" or type == "sign-cached":
         caname = "signing" + ("-int" if cached_int else "-ca") + ".crt"
-    elif type == "kemtls" or type == "pdk":
+    elif type in ("kemtls", "pdk") or type.startswith("pdkss"):
         caname = "kem" + ("-int" if cached_int else "-ca") + ".crt"
     else:
         logger.error("Unknown experiment type=%s", type)
@@ -356,8 +398,12 @@ def run_measurement(output_queue, port, experiment: Experiment, cached_int):
     restarts = 0
     allowed_restarts = 2 * MEASUREMENTS_PER_PROCESS / MEASUREMENTS_PER_CLIENT
     cache_args = []
-    if type == "pdk":
+    if type.startswith("pdk"):
         cache_args = ["--cached-certs", "kem.crt"]
+        if type in ("pdkss", "pdkss-update"):
+            cache_args += ["--1rtt-pk", "semistatic-epoch-1.pub", "--1rtt-epoch", "semistatic-epoch-1.epoch", "--1rtt-nocommit"]
+        elif type == "pdkss-async":
+            cache_args += ["--1rtt-pk", "semistatic-epoch-2.pub", "--1rtt-epoch", "semistatic-epoch-2.epoch", "--1rtt-nocommit"]
     elif type == "sign-cached":
         if not cached_int:
             cache_args = ["--cached-certs", "signing.all.crt"]
@@ -367,7 +413,8 @@ def run_measurement(output_queue, port, experiment: Experiment, cached_int):
     if experiment.client_auth is not None:
         clientauthopts = ["--auth-certs", "client.crt", "--auth-key", "client.key"]
     while len(client_measurements) < MEASUREMENTS_PER_PROCESS and server.is_alive() and restarts < allowed_restarts:
-        logger.debug(f"Starting measurements on port {port}")
+        remaining = MEASUREMENTS_PER_PROCESS - len(client_measurements)
+        logger.debug(f"Starting measurements on port {port} ({remaining} remaining)")
         cmd = [
             "ip", "netns", "exec", "cli_ns",
             f"./{clientname}",
@@ -589,7 +636,7 @@ def get_experiment_path(exp: Experiment) -> Path:
 def main():
     os.makedirs("data", exist_ok=True)
     os.chown("data", uid=USERID, gid=GROUPID)
-    for (type, caching) in itertools.product(["kemtls", "sign", "sign-cached", "pdk"], ["int-chain", "int-only"]):
+    for (type, caching) in itertools.product(["kemtls", "sign", "sign-cached", "pdk", "pdkss", "pdkss-update", "pdkss-async"], ["int-chain", "int-only"]):
         dirname = SCRIPTDIR.parent / "data" / f"{type}-{caching}"
         os.makedirs(dirname, exist_ok=True)
         os.chown(dirname, uid=1001, gid=1001)
@@ -606,7 +653,7 @@ def main():
             else:
                 rate = 10
             (type, kex_alg, leaf, intermediate, root, client_auth, client_ca) = experiment
-            if type in ("pdk", "sign-cached") and not int_only:
+            if (type == "sign-cached" or type.startswith("pdk")) and not int_only:
                 # Skip PDK variants like KKDD, they don't make sense as the cert isn't sent.
                 continue
             experiment = get_experiment_instantiation(experiment)
@@ -630,7 +677,7 @@ def main():
             for _ in range(ITERATIONS):
                 result += experiment_run_timers(experiment, int_only)
             duration = datetime.datetime.utcnow() - start_time
-            logger.info("took %s", duration)
+            logger.info("Experiment completed in %s", duration)
 
             with open(fngetter("csv"), "w+") as outresult, open(fngetter("cmdline"), "w+") as outlog:
                 write_result(outresult, outlog, result)
@@ -663,6 +710,10 @@ if __name__ == "__main__":
         ALGORITHMS = filter(lambda x: x.client_auth == client_auth, ALGORITHMS)
     if (client_ca := os.environ.get("CLIENT_CA")) is not None:
         ALGORITHMS = filter(lambda x: x.client_ca == client_ca, ALGORITHMS)
+
+    # Client auth only
+    ALGORITHMS = filter(lambda x: x.client_auth is not None, ALGORITHMS)
+
     ALGORITHMS = list(ALGORITHMS)
 
     if len(sys.argv) < 2 or sys.argv[1] != "full":
@@ -673,6 +724,9 @@ if __name__ == "__main__":
     logger.info("KEMTLS experiments: {}".format(sum(1 for alg in ALGORITHMS if alg[0] == "kemtls")))
     logger.info("PDK experiments: {}".format(sum(1 for alg in ALGORITHMS if alg[0] == "pdk")))
     logger.info("Sign-cached experiments: {}".format(sum(1 for alg in ALGORITHMS if alg[0] == "sign-cached")))
+    logger.info("PDK-SS experiments (in sync): {}".format(sum(1 for alg in ALGORITHMS if alg[0] == "pdkss")))
+    logger.info("PDK-SS experiments (not in sync): {}".format(sum(1 for alg in ALGORITHMS if alg[0] == "pdkss-async")))
+    logger.info("PDK-SS experiments (in sync, update): {}".format(sum(1 for alg in ALGORITHMS if alg[0] == "pdkss-update")))
 
     setup_experiments()
     hostname = reverse_resolve_hostname()

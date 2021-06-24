@@ -603,6 +603,8 @@ impl CompleteClientHelloHandling {
         }
     }
 
+    /// Take in the clienthello message.
+    /// For KEMTLS-PDK / PDK-SS it has split logic, as the server needs to receive a certificate message before replying.
     pub fn handle_client_hello(mut self,
                                sess: &mut ServerSessionImpl,
                                server_key: sign::CertifiedKey,
@@ -803,7 +805,6 @@ impl CompleteClientHelloHandling {
                 // semi-static 1RTT-KEMTLS or the normal KEMTLS 
                 let read_key = if let Some(sskemtls) = proactive_semi_static_shared_secret {
                     // HS <- HKDF.Extract(dES, K_s)
-                    self.handshake.print_runtime("CREATING HS");
                     // is it not optimal to recalculate this
                     let ks = proactive_static_shared_secret
                         .map(|ss| KeyScheduleEarly::new(suite.hkdf_algorithm, &ss)).unwrap();
@@ -816,7 +817,7 @@ impl CompleteClientHelloHandling {
                                 .client_handshake_traffic_secret(&client_hello_hash,
                                                                 &*sess.config.key_log,
                                                                 &self.handshake.randoms.client);
-                    self.handshake.print_runtime("CREATED HS");
+                    self.handshake.print_runtime("DERIVED HS");
                     handshake_secret = Some(hs);
                     chts
                 } else {
@@ -874,9 +875,8 @@ impl CompleteClientHelloHandling {
         ss_ephemeral: &[u8], ss_client: &[u8],
     ) -> Result<(), TLSError> {
         let handshake = &self.handshake;
-        handshake.print_runtime("DERIVING MS");
         handshake_secret
-                    .into_ssrttkemtls_master_secret(ss_ephemeral,ss_client,true);
+            .into_ssrttkemtls_master_secret(ss_ephemeral,ss_client,true);
         let handshake_hash = handshake.transcript.get_current_hash();
         // SAHTS <- HKDF.Expand(MS, "s ahs traffic", H(CH)..H(SH))
         let write_key = handshake_secret
@@ -1165,8 +1165,6 @@ impl hs::State for ExpectPDKCertificate {
         
         // Try to figure out when we are talking about 1RTT-KEMTLS in two round trip version
         if self.second_try {
-            // simon: to be checked carefully if this is the optimal way to do it
-            // simon: should I check hs::check_aligned_handshake(sess)?;
             let ss = self.emit_ciphertext(sess,cert)?;
             let finished_pending = emit_finished_non_eq_epoch_rttkemtls_finished(
                                                         &mut self.expect_hello.handshake,
