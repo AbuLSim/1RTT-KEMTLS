@@ -384,9 +384,9 @@ impl CompleteClientHelloHandling {
     fn maybe_emit_server_public_key(&self,
                             sess: &mut ServerSessionImpl)
                             -> Result<(), TLSError> {
-        // read pk from a file
         let epoch = sess.config.ssrtt_resolver.next(sess.ssrtt_client_epoch.as_ref());
         if epoch.is_none() {
+            trace!("Don't have a next epoch for the client");
             return Ok(());
         }
         let epoch = epoch.unwrap();

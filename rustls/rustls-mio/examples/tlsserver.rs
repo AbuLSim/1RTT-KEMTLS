@@ -663,6 +663,8 @@ fn make_config(args: &Args) -> Arc<rustls::ServerConfig> {
             let next_pk = load_pk(args.flag_1rtt_public_next.as_ref().expect("need --1rtt-public-next with --1rttt-x-next"));
             let next_sk = load_private_key(args.flag_1rtt_key_next.as_ref().expect("need --1rtt-key-next with --1rttt-x-next"));
             resolver.set_next(next_ep, next_pk, next_sk);
+        } else {
+            println!("Set up 1rtt semistatic without a next epoch key");
         }
         config.ssrtt_resolver = Arc::new(resolver);
     }
