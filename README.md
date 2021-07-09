@@ -76,10 +76,9 @@ This repository accompanies
 * First install [``Rust``](https://www.rust-lang.org/tools/install) latest version.
 * The compilation will not work if your C compilor *gcc* is older than *gcc 7.1*.
 * Docker installation is not required to run the code on your local machine.
-* Install Pipenv (Python virtualenv manager), libssl-dev (C crypto library)
-	CMake (packaging installer), Clang and LLVM (cross compilor and linker);
+* Install libssl-dev (C crypto library), CMake (packaging installer), Clang and LLVM (cross compilor and linker);
 	``sudo apt-get install -qq -y libssl-dev cmake clang-12 llvm-12``
-* Please install *pipenv* if you would like to generate certificates from `mk-cert` folder.
+* Please install *pipenv* (Python virtualenv manager) if you would like to generate certificates from `mk-cert` folder.
 
 ### Running the implementation
 
@@ -90,12 +89,19 @@ This repository accompanies
 	``cargo run --example tlsclient -- --help``. This will run the server/client and output all the available
 	options that will allow you to either run tls 1.3, or KEMTLS, or KEMTLS-PDK, or KEMTLS-PDK-SS (a.k.a. 1RTT-KEMTLS)
 * Now let's run the KEMTLS-PDK-SS (Key Encapsulation Mecanism TLS with pre-distributed keys and semi-static keys)
+	
 	Run the server by typing 
+	
 	``cargo run --example tlsserver -- --port 10001 --certs ../../certificates/1RTT-KEMTLS/kem.crt --key ../../certificates/1RTT-KEMTLS/kem.key --require-auth  --auth ../../certificates/1RTT-KEMTLS/client-ca.crt --1rtt-key ../../certificates/1RTT-KEMTLS/kem_ssrttkemtls.key  --1rtt-public ../../certificates/1RTT-KEMTLS/kem_ssrttkemtls.pub --1rtt-epoch ../../certificates/1RTT-KEMTLS/server.epoch  http``
-	or depending on which sub-protocol one would like to run (check **KEMTLS with Delayed Forward Identity Protection in (Almost) a Single Round Trip**) you can also type 
+	
+	or depending on which sub-protocol one would like to run (check **KEMTLS with Delayed Forward Identity Protection in (Almost) a Single Round Trip**) you can also type
+	
 	``cargo run --example tlsserver -- --port 10001 --certs ../../certificates/1RTT-KEMTLS/kem.crt --key ../../certificates/1RTT-KEMTLS/kem.key --require-auth  --auth ../../certificates/1RTT-KEMTLS/client-ca.crt --1rtt-key ../../certificates/1RTT-KEMTLS/kem_ssrttkemtls.key  --1rtt-public ../../certificates/1RTT-KEMTLS/kem_ssrttkemtls.pub --1rtt-epoch ../../certificates/1RTT-KEMTLS/server.epoch  --1rtt-key-next ../../certificates/1RTT-KEMTSL/semistatic-epoch-2.key --1rtt-epoch-next ../../certificates/1RTT-KEMTSL/semistatic-epoch-2.epoch --1rtt-public-next ../../certificates/1RTT-KEMTSL/semistatic-epoch-2.pub http``
+	
 	In parallel, run the client with
+	
 	``cargo run --example tlsclient -- -p 10001 --http --cafile ../../certificates/1RTT-KEMTLS/kem.chain.crt --auth-key ../../certificates/1RTT-KEMTLS/client.key --auth-certs ../../certificates/1RTT-KEMTLS/client.crt --1rtt-pk ../../certificates/1RTT-KEMTLS/kem_ssrttkemtls.pub --1rtt-epoch ../../certificates/1RTT-KEMTLS/client.epoch --cached-certs ../../certificates/1RTT-KEMTLS/kem.crt servername``
+	
 	Depending on the client and server epoch numbers (if they are equal or different) one round trip KEMTLS-SS protocol is used
 	or the two round trip KEMTLS-SS is used.
 	
