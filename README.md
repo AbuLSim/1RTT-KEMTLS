@@ -39,7 +39,7 @@ This repository accompanies
 
 ### Main folders
 
-* ``rustls-kemtls``: modified Rustls TLS stack to implement KEMTLS and post-quantum versions of "normal" TLS 1.3
+* ``rustls``: modified Rustls TLS stack to implement KEMTLS and post-quantum versions of "normal" TLS 1.3
 * ``measuring``: The scripts to measure the above
 * ``ring``: Modified version of Ring to allow for longer DER-encoded strings than typically expected from TLS instances.
 * ``webpki``: Modified version of WebPKI to work with PQ and KEM public keys in certificates
@@ -48,11 +48,11 @@ This repository accompanies
 
 ### Supporting repositories
 
-* [``oqs-rs``][]: Rust wrapper around ``liboqs``.
+* [``oqs-rs``][]: Rust wrapper around ``liboqs``. Contains additional implementations of schemes (notably AVX2 implementations).
 * ``mk-cert/xmss-rs``: Rust wrapper around the XMSS reference code, with our custom parameter set (``src/settings.rs``) and utilities for keygen and signing.
 * ``csidh-rust``: Rust wrapper around the Meyer, Campos, Reith constant-time implementation of CSIDH.
 
-[``oqs-rs``]: https://github.com/open-quantum-safe/liboqs-rust.git
+[``oqs-rs``]: https://github.com/open-quantum-safe/liboqs-rust
 
 ## Working with this repository
 
