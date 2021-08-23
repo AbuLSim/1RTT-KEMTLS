@@ -609,7 +609,20 @@ impl ExpectCertificate {
     }
 
     fn emit_ciphertext(&mut self, sess: &mut ClientSessionImpl, certificate: webpki::EndEntityCert) -> Result<(), TLSError> {
-        emit_fake_ccs(&mut self.handshake, sess);
+        // 1. Verify the certificate chain.
+        if self.server_cert.cert_chain.is_empty() {
+            return Err(TLSError::NoCertificatesPresented);
+        }
+
+        let _ = sess.config
+            .get_verifier()
+            .verify_server_cert(&sess.config.root_store,
+                                &self.server_cert.cert_chain,
+                                self.handshake.dns_name.as_ref(),
+                                &self.server_cert.ocsp_response)
+            .map_err(|err| send_cert_error_alert(sess, err))?;
+
+
         self.handshake.print_runtime("ENCAPSULATING TO CERT");
         let (ct, ss) = certificate.encapsulate().map_err(TLSError::WebPKIError)?;
         self.handshake.print_runtime("ENCAPSULATED TO CERT");
@@ -621,6 +634,7 @@ impl ExpectCertificate {
                 payload: HandshakePayload::ServerKemCiphertext(Payload::new(ct.into_vec())),
             }),
         };
+        emit_fake_ccs(&mut self.handshake, sess);
         self.handshake.transcript.add_message(&m);
         sess.common.send_msg(m, true);
         self.handshake.print_runtime("SUBMITTED CKEX TO SERVER");
