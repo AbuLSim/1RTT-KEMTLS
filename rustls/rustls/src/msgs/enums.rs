@@ -129,6 +129,7 @@ enum_builder! {
         ClientKemCiphertext => 0x21,
         // 1RTT-KEMTLS
         ServerPublicKey => 0x22,
+        KEMCiphertext => 0x23,
     }
 }
 
@@ -249,6 +250,7 @@ enum_builder! {
         
         // 1RTT-KEMTLS
         ProactiveCiphertextKEMTLS => 0xfff3,
+        AcceptedEpoch => 0xfff4,
     }
 }
 

@@ -1298,6 +1298,7 @@ fn emit_finished_kemtlspdk(
 
     #[cfg(feature = "quic")] {
         sess.common.quic.traffic_secrets = Some(quic::Secrets {
+            // not sure what to put in _read_key
             client: _read_key,
             server: write_key,
         });
@@ -1501,16 +1502,17 @@ impl hs::State for ExpectCertificate {
             return Err(TLSError::NoCertificatesPresented);
         }
 
+        sess.config.get_verifier().verify_client_cert(&cert_chain, sess.get_sni())
+        .or_else(|err| {
+             hs::incompatible(sess, "certificate invalid");
+             Err(err)
+            })?;
+
         if self.key_schedule.is_kemtls() {
             let cert = ClientCertDetails::new(cert_chain);
             let ss = self.emit_ciphertext(sess, cert)?;
             self.into_expect_kemtls_finished(ss)
         } else {
-            sess.config.get_verifier().verify_client_cert(&cert_chain, sess.get_sni())
-                .or_else(|err| {
-                     hs::incompatible(sess, "certificate invalid");
-                     Err(err)
-                    })?;
             let cert = ClientCertDetails::new(cert_chain);
 
             Ok(self.into_expect_certificate_verify(cert))

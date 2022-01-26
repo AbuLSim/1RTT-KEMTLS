@@ -865,6 +865,13 @@ impl ClientExtension {
                 }
             ),ss))
     }
+
+    pub fn from_extension_to_ciphertext(ext: ClientExtension) -> PayloadU16 {
+        match ext {
+            ClientExtension::ProactiveCiphertext(cipher) => cipher.ciphertext,
+            _ => panic!("Not of type: ProactiveCiphertext")
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1490,14 +1497,6 @@ impl ServerHelloPayload {
         let ext = self.find_extension(ExtensionType::ProactiveCiphertext)?;
         match ext {
             ServerExtension::ProactiveCiphertextAccepted(obj) => Some(obj),
-            _ => None,
-        }
-    }
-
-    pub fn get_accepted_kemtls_ciphertext(&self) -> Option<&PayloadU16> {
-        let ext = self.find_extension(ExtensionType::ProactiveCiphertextKEMTLS)?;
-        match ext {
-            ServerExtension::ProactiveCiphertextKEMTLSAccepted(obj) => Some(obj),
             _ => None,
         }
     }
@@ -2392,6 +2391,7 @@ pub enum HandshakePayload {
     ServerKemCiphertext(Payload),
     ClientKemCiphertext(Payload),
     ServerPublicKey(ServerPublicKey),
+    KEMCiphertext(PayloadU16),
     Unknown(Payload),
 }
 
@@ -2420,10 +2420,10 @@ impl HandshakePayload {
             HandshakePayload::CertificateStatus(ref x) => x.encode(bytes),
             HandshakePayload::MessageHash(ref x) => x.encode(bytes),
             HandshakePayload::Unknown(ref x) => x.encode(bytes),
-            HandshakePayload::ServerKemCiphertext(ref x) => {x.encode(bytes)}
-            HandshakePayload::ClientKemCiphertext(ref x) => {x.encode(bytes)}
-            HandshakePayload::ServerPublicKey(ref x) => {x.encode(bytes)}
-
+            HandshakePayload::ServerKemCiphertext(ref x) => {x.encode(bytes)},
+            HandshakePayload::ClientKemCiphertext(ref x) => {x.encode(bytes)},
+            HandshakePayload::ServerPublicKey(ref x) => {x.encode(bytes)},
+            HandshakePayload::KEMCiphertext(ref x) => {x.encode(bytes)}
         }
     }
 }
@@ -2531,6 +2531,9 @@ impl HandshakeMessagePayload {
             }
             HandshakeType::ServerPublicKey => {
                  HandshakePayload::ServerPublicKey(ServerPublicKey::read(&mut sub)?)
+            }
+            HandshakeType::KEMCiphertext => {
+                HandshakePayload::KEMCiphertext(PayloadU16::read(&mut sub).unwrap())
             }
             HandshakeType::KeyUpdate => {
                 HandshakePayload::KeyUpdate(KeyUpdateRequest::read(&mut sub)?)

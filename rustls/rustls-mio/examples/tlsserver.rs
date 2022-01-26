@@ -319,7 +319,7 @@ impl Connection {
 
     fn send_http_response_once(&mut self) {
         let response =
-            b"HTTP/1.0 200 OK\r\nConnection: close\r\n\r\nHello world from rustls tlsserver\r\n";
+        b"HTTP/1.0 200 OK\r\nConnection: close\r\n\r\nHello world from rustls tlsserver\r\n";
         if !self.sent_http_response {
             self.tls_session
                 .write_all(response)
