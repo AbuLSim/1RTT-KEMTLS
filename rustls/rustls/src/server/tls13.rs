@@ -993,8 +993,8 @@ impl CompleteClientHelloHandling {
                     typ: ContentType::Handshake,
                     version: ProtocolVersion::TLSv1_3,
                     payload: MessagePayload::Handshake(HandshakeMessagePayload {
-                        typ: HandshakeType::ClientKemCiphertext,
-                        payload: HandshakePayload::ClientKemCiphertext(Payload::new(ct.into_vec())),
+                        typ: HandshakeType::KEMCiphertext,
+                        payload: HandshakePayload::KEMCiphertext(Payload::new(ct.into_vec())),
                     }),
                 };
                 self.handshake.transcript.add_message(&m);
@@ -1113,8 +1113,8 @@ impl ExpectPDKCertificate {
             typ: ContentType::Handshake,
             version: ProtocolVersion::TLSv1_3,
             payload: MessagePayload::Handshake(HandshakeMessagePayload {
-                typ: HandshakeType::ClientKemCiphertext,
-                payload: HandshakePayload::ClientKemCiphertext(Payload::new(ct.into_vec())),
+                typ: HandshakeType::KEMCiphertext,
+                payload: HandshakePayload::KEMCiphertext(Payload::new(ct.into_vec())),
             }),
         };
         self.expect_hello.handshake.transcript.add_message(&m);
@@ -1336,7 +1336,7 @@ impl ExpectCiphertext {
 
 impl hs::State for ExpectCiphertext {
     fn handle(mut self: Box<Self>, sess: &mut ServerSessionImpl, m: Message) -> hs::NextStateOrError {
-        let ctmsg = require_handshake_msg!(m, HandshakeType::ServerKemCiphertext, HandshakePayload::ServerKemCiphertext)?;
+        let ctmsg = require_handshake_msg!(m, HandshakeType::KEMCiphertext, HandshakePayload::KEMCiphertext)?;
         self.handshake.print_runtime("RECEIVED CKEX");
         
         // decapsulate
@@ -1448,8 +1448,8 @@ impl ExpectCertificate {
             typ: ContentType::Handshake,
             version: ProtocolVersion::TLSv1_3,
             payload: MessagePayload::Handshake(HandshakeMessagePayload {
-                typ: HandshakeType::ClientKemCiphertext,
-                payload: HandshakePayload::ClientKemCiphertext(Payload::new(ct.into_vec())),
+                typ: HandshakeType::KEMCiphertext,
+                payload: HandshakePayload::KEMCiphertext(Payload::new(ct.into_vec())),
             }),
         };
         self.handshake.transcript.add_message(&m);

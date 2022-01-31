@@ -13,6 +13,7 @@ use crate::log::warn;
 ///
 /// For client auth, we also need to buffer all the messages.
 /// This is disabled in cases where client auth is not possible.
+#[derive(Clone)]
 pub struct HandshakeHash {
     /// None before we know what hash function we're using
     alg: Option<&'static digest::Algorithm>,

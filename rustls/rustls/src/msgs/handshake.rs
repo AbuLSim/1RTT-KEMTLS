@@ -2388,10 +2388,8 @@ pub enum HandshakePayload {
     Finished(Payload),
     CertificateStatus(CertificateStatus),
     MessageHash(Payload),
-    ServerKemCiphertext(Payload),
-    ClientKemCiphertext(Payload),
+    KEMCiphertext(Payload),
     ServerPublicKey(ServerPublicKey),
-    KEMCiphertext(PayloadU16),
     Unknown(Payload),
 }
 
@@ -2420,10 +2418,8 @@ impl HandshakePayload {
             HandshakePayload::CertificateStatus(ref x) => x.encode(bytes),
             HandshakePayload::MessageHash(ref x) => x.encode(bytes),
             HandshakePayload::Unknown(ref x) => x.encode(bytes),
-            HandshakePayload::ServerKemCiphertext(ref x) => {x.encode(bytes)},
-            HandshakePayload::ClientKemCiphertext(ref x) => {x.encode(bytes)},
+            HandshakePayload::KEMCiphertext(ref x) => {x.encode(bytes)},
             HandshakePayload::ServerPublicKey(ref x) => {x.encode(bytes)},
-            HandshakePayload::KEMCiphertext(ref x) => {x.encode(bytes)}
         }
     }
 }
@@ -2532,9 +2528,6 @@ impl HandshakeMessagePayload {
             HandshakeType::ServerPublicKey => {
                  HandshakePayload::ServerPublicKey(ServerPublicKey::read(&mut sub)?)
             }
-            HandshakeType::KEMCiphertext => {
-                HandshakePayload::KEMCiphertext(PayloadU16::read(&mut sub).unwrap())
-            }
             HandshakeType::KeyUpdate => {
                 HandshakePayload::KeyUpdate(KeyUpdateRequest::read(&mut sub)?)
             }
@@ -2552,11 +2545,8 @@ impl HandshakeMessagePayload {
                 // not legal on wire
                 return None;
             }
-            HandshakeType::ServerKemCiphertext => {
-                HandshakePayload::ServerKemCiphertext(Payload::read(&mut sub).unwrap())
-            }
-            HandshakeType::ClientKemCiphertext => {
-                HandshakePayload::ClientKemCiphertext(Payload::read(&mut sub).unwrap())
+            HandshakeType::KEMCiphertext => {
+                HandshakePayload::KEMCiphertext(Payload::read(&mut sub).unwrap())
             }
             _ => {
                 HandshakePayload::Unknown(Payload::read(&mut sub).unwrap())
