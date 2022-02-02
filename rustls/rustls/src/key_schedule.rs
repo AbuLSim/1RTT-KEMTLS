@@ -45,7 +45,7 @@ impl SecretKind {
             SecretKind::ClientAuthenticatedHandshakeTrafficSecret => b"c ahs traffic",
             SecretKind::ServerAuthenticatedHandshakeTrafficSecret => b"s ahs traffic",
             SecretKind::ClientApplicationTrafficSecret => b"c ap traffic",
-            SecretKind::ServerApplicationTrafficSecret => b"traffic",
+            SecretKind::ServerApplicationTrafficSecret => b"s ap traffic",
             SecretKind::ExporterMasterSecret => b"exp master",
             SecretKind::ResumptionMasterSecret => b"res master",
             SecretKind::DerivedSecret => b"derived",

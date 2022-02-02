@@ -123,6 +123,37 @@ impl HandshakeHash {
         ret
     }
 
+    /// Copies one transcript in self and discards the transcript
+    pub fn copy_transcript(&mut self, transcript: HandshakeHash) -> bool {
+        if transcript.ctx.is_none(){
+            warn!("No data to copy from transcript in HandshakeHash::copy_transcript");
+            return false;
+        }
+        if !transcript.buffer.is_empty() || !self.buffer.is_empty(){
+            warn!("No emptied transcripts buffers in HandshakeHash::copy_transcript");
+            return false;    
+        }
+        match transcript.alg {
+            None => {
+                warn!("No algorithm to copy from transcript in HandshakeHash::copy_transcript");
+                return false;
+            },
+            Some(transcript_alg) => {
+                    match self.alg {
+                        Some(alg) => {
+                            if alg != transcript_alg {
+                                warn!("altered hash to HandshakeHash::copy_transcript");
+                                return false;
+                            };
+                        },
+                        None => {},
+                }
+            }
+        }
+        self.ctx.replace(transcript.ctx.unwrap());
+        return true;
+    }
+
     /// Take the current hash value, and encapsulate it in a
     /// 'handshake_hash' handshake message.  Start this hash
     /// again, with that message at the front.

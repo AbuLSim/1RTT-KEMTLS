@@ -18,7 +18,6 @@ use crate::msgs::persist;
 use crate::client::ClientSessionImpl;
 use crate::key_schedule::{
     KeyScheduleEarly,
-    KeyScheduleNonSecret,
     KeyScheduleHandshake,
     KeyScheduleTraffic
 };
@@ -41,6 +40,7 @@ use crate::{
 use crate::client::common::{ServerCertDetails, HandshakeDetails};
 use crate::client::common::{ClientHelloDetails, ClientAuthDetails};
 use crate::client::hs;
+use crate::hash_hs;
 
 use crate::client::default_group::DEFAULT_GROUP;
 
@@ -908,16 +908,17 @@ pub fn emit_client_kem_ciphertext(handshake: &mut HandshakeDetails,
     // cannot directly add message to handshake transcript
     // in case the 1RTT-KEMTLS epochs do not match
     // need to accumulate transcripts and send them at the end
-    let transcript_hash = handshake.transcript.clone();
-    transcript_hash.add_message(&m);
+    // careful not to use non_eq_epoch_transcript if already have one
+    let non_eq_epoch_transcript = handshake.transcript.clone();
+    handshake.transcript.add_message(&m);
     handshake.print_runtime("EMIT ClientKEMCiphertext");
     sess.common.send_msg(m, true);    
-    transcript_hash
+    non_eq_epoch_transcript
 }
 
 pub fn emit_certificate_tls13(handshake: &mut HandshakeDetails,
                           client_auth: &mut ClientAuthDetails,
-                          sess: &mut ClientSessionImpl) {
+                          sess: &mut ClientSessionImpl){
     let context = client_auth.auth_context
         .take()
         .unwrap_or_else(Vec::new);
@@ -943,13 +944,9 @@ pub fn emit_certificate_tls13(handshake: &mut HandshakeDetails,
         }),
     };
     trace!("Sending certificate message {:?}", &m);
-    // certificate must be added to transcript only when it's not 1RTT-KEMTLS
-    if sess.ssrtt_data.is_none(){
-        handshake.transcript.add_message(&m);
-    }
+    handshake.transcript.add_message(&m);
     handshake.print_runtime("EMIT CERT");
     sess.common.send_msg(m, true);
-
 }
 
 fn emit_certverify_tls13(handshake: &mut HandshakeDetails,
