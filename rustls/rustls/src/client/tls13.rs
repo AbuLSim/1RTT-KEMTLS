@@ -54,7 +54,7 @@ static ALLOWED_PLAINTEXT_EXTS: &[ExtensionType] = &[
     ExtensionType::PreSharedKey,
     ExtensionType::SupportedVersions,
     ExtensionType::ProactiveCiphertext,
-    ExtensionType::ProactiveCiphertextKEMTLS,
+    ExtensionType::ProactiveCiphertextSSKEMTLS,
 ];
 
 // Only the intersection of things we offer, and those disallowed

@@ -209,7 +209,7 @@ impl CompleteClientHelloHandling {
             let certificate = webpki::EndEntityCert::from(&cert.cert_chain[0].0)
                 .map_err(TLSError::WebPKIError)?;
             let (ct, ss) = certificate.encapsulate().map_err(|_| TLSError::DecryptError)?;
-            extensions.push(ServerExtension::ProactiveCiphertextKEMTLSAccepted(PayloadU16::new(ct.into_vec())));
+            extensions.push(ServerExtension::ProactiveCiphertextSSKEMTLSAccepted(PayloadU16::new(ct.into_vec())));
             Some(ss)
         } else {
             None
@@ -744,7 +744,7 @@ impl CompleteClientHelloHandling {
             // Check equality between server epoch and client epoch 
             // Decapsulate PDK 1RTT-KEMTLS
             // check if client has sent the 1RTT-KEMTLS extension
-            if let Some(pdk_kemtls) = client_hello.get_proactive_ciphertext_kemtls() {
+            if let Some(pdk_kemtls) = client_hello.get_proactive_ciphertext_sskemtls() {
                 // check equality between epochs
                 let client_epoch = Epoch(pdk_kemtls.epoch.clone().into_inner());
                 let epoch_sk = sess.config.ssrtt_resolver.get(&client_epoch);

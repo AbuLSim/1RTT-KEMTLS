@@ -606,12 +606,12 @@ impl Codec for ProactiveCiphertextOffer {
 
 //1RTT-KEMTLS ciphertext-epoch stucture
 #[derive (Clone, Debug)]
-pub struct ProactiveCiphertextKEMTLS {
+pub struct ProactiveCiphertextSSKEMTLS {
     pub epoch : PayloadU8,
     pub ciphertext: PayloadU16,
 }
 
-impl Codec for ProactiveCiphertextKEMTLS {
+impl Codec for ProactiveCiphertextSSKEMTLS {
     fn encode(&self, bytes: &mut Vec<u8>) {
         self.epoch.encode(bytes);
         self.ciphertext.encode(bytes);
@@ -620,7 +620,7 @@ impl Codec for ProactiveCiphertextKEMTLS {
     fn read(r: &mut Reader) -> Option<Self> {
         let epoch = PayloadU8::read(r)?;
         let ciphertext = PayloadU16::read(r)?;
-        Some(ProactiveCiphertextKEMTLS { epoch, ciphertext })
+        Some(ProactiveCiphertextSSKEMTLS { epoch, ciphertext })
     }
 }
 
@@ -648,7 +648,7 @@ pub enum ClientExtension {
     CachedInformation(CachedInfo),
     ProactiveCiphertext(ProactiveCiphertextOffer),
     //1RTT-KEMTLS
-    ProactiveCiphertextKEMTLS(ProactiveCiphertextKEMTLS),
+    ProactiveCiphertextSSKEMTLS(ProactiveCiphertextSSKEMTLS),
     ProactiveClientAuth,
 }
 
@@ -676,7 +676,7 @@ impl ClientExtension {
             ClientExtension::ProactiveCiphertext(_) => ExtensionType::ProactiveCiphertext,
             ClientExtension::ProactiveClientAuth => ExtensionType::ProactiveClientAuth,
             //1RTT-KEMTLS
-            ClientExtension::ProactiveCiphertextKEMTLS(_) => ExtensionType::ProactiveCiphertextKEMTLS,
+            ClientExtension::ProactiveCiphertextSSKEMTLS(_) => ExtensionType::ProactiveCiphertextSSKEMTLS,
             ClientExtension::Unknown(ref r) => r.typ,
         }
     }
@@ -710,7 +710,7 @@ impl Codec for ClientExtension {
             ClientExtension::CachedInformation(ref obj) => obj.encode(&mut sub),
             ClientExtension::ProactiveCiphertext(ref r) => r.encode(&mut sub),
             // 1RTT-KEMTLS
-            ClientExtension::ProactiveCiphertextKEMTLS(ref r) => r.encode(& mut sub),
+            ClientExtension::ProactiveCiphertextSSKEMTLS(ref r) => r.encode(& mut sub),
         }
 
         (sub.len() as u16).encode(bytes);
@@ -777,8 +777,8 @@ impl Codec for ClientExtension {
                 ClientExtension::ProactiveCiphertext(ProactiveCiphertextOffer::read(&mut sub)?)
             }
             // 1RTT-KEMTLS
-            ExtensionType::ProactiveCiphertextKEMTLS=> {
-                ClientExtension::ProactiveCiphertextKEMTLS(ProactiveCiphertextKEMTLS::read(&mut sub)?)
+            ExtensionType::ProactiveCiphertextSSKEMTLS=> {
+                ClientExtension::ProactiveCiphertextSSKEMTLS(ProactiveCiphertextSSKEMTLS::read(&mut sub)?)
             },
             ExtensionType::EarlyData if !sub.any_left() => {
                 ClientExtension::EarlyData
@@ -858,8 +858,8 @@ impl ClientExtension {
     pub fn encapsulate_1rtt_pk(pk: &Vec<u8>,epoch_1rtt: epoch::Epoch) -> Option<(ClientExtension, oqs::kem::SharedSecret)> {
         let (ct, ss) = webpki::EndEntityCert::encapsulate_kem_from_pk(pk).ok()?;
         let epoch::Epoch(e) = epoch_1rtt;
-        Some((ClientExtension::ProactiveCiphertextKEMTLS(
-                ProactiveCiphertextKEMTLS{ 
+        Some((ClientExtension::ProactiveCiphertextSSKEMTLS(
+                ProactiveCiphertextSSKEMTLS{ 
                     epoch: PayloadU8::new(e), 
                     ciphertext: PayloadU16::new(ct.as_ref().to_vec()) 
                 }
@@ -891,7 +891,7 @@ pub enum ServerExtension {
     EarlyData,
     ProactiveCiphertextAccepted(PayloadU8),
     // 1RTT-KEMTLS
-    ProactiveCiphertextKEMTLSAccepted(PayloadU16),
+    ProactiveCiphertextSSKEMTLSAccepted(PayloadU16),
     CachedInformation(CachedInfoTypes),
     Unknown(UnknownExtension),
 }
@@ -916,7 +916,7 @@ impl ServerExtension {
             ServerExtension::CachedInformation(_) => ExtensionType::CachedInformation,
             ServerExtension::ProactiveCiphertextAccepted(_) => ExtensionType::ProactiveCiphertext,
             // 1RTT-KEMTLS
-            ServerExtension::ProactiveCiphertextKEMTLSAccepted(_) => ExtensionType::ProactiveCiphertextKEMTLS,
+            ServerExtension::ProactiveCiphertextSSKEMTLSAccepted(_) => ExtensionType::ProactiveCiphertextSSKEMTLS,
         }
     }
 }
@@ -942,7 +942,7 @@ impl Codec for ServerExtension {
             ServerExtension::TransportParameters(ref r) => sub.extend_from_slice(r),
             ServerExtension::CachedInformation(ref r) => r.encode(&mut sub),
             ServerExtension::ProactiveCiphertextAccepted(ref r) => r.encode(&mut sub),
-            ServerExtension::ProactiveCiphertextKEMTLSAccepted(ref r) => r.encode(&mut sub),
+            ServerExtension::ProactiveCiphertextSSKEMTLSAccepted(ref r) => r.encode(&mut sub),
             ServerExtension::Unknown(ref r) => r.encode(&mut sub),
         }
 
@@ -988,7 +988,7 @@ impl Codec for ServerExtension {
             ExtensionType::CachedInformation => ServerExtension::CachedInformation(CachedInfoTypes::read(&mut sub)?),
             ExtensionType::ProactiveCiphertext => ServerExtension::ProactiveCiphertextAccepted(PayloadU8::read(&mut sub)?),
             // 1RTT-KEMTLS
-            ExtensionType::ProactiveCiphertextKEMTLS => ServerExtension::ProactiveCiphertextKEMTLSAccepted(PayloadU16::read(&mut sub)?),
+            ExtensionType::ProactiveCiphertextSSKEMTLS => ServerExtension::ProactiveCiphertextSSKEMTLSAccepted(PayloadU16::read(&mut sub)?),
             ExtensionType::EarlyData => ServerExtension::EarlyData,
             _ => ServerExtension::Unknown(UnknownExtension::read(typ, &mut sub)?),
         })
@@ -1236,10 +1236,10 @@ impl ClientHelloPayload {
     }
 
     // 1RTT-KEMTLS get_extension
-    pub fn get_proactive_ciphertext_kemtls(&self) -> Option<&ProactiveCiphertextKEMTLS> {
-        let ext = self.find_extension(ExtensionType::ProactiveCiphertextKEMTLS)?;
+    pub fn get_proactive_ciphertext_sskemtls(&self) -> Option<&ProactiveCiphertextSSKEMTLS> {
+        let ext = self.find_extension(ExtensionType::ProactiveCiphertextSSKEMTLS)?;
         match *ext {
-            ClientExtension::ProactiveCiphertextKEMTLS(ref cipher) => Some(cipher),
+            ClientExtension::ProactiveCiphertextSSKEMTLS(ref cipher) => Some(cipher),
             _ => None,
         }
     } 

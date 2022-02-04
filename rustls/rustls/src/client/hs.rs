@@ -453,7 +453,9 @@ fn emit_client_hello_for_retry(sess: &mut ClientSessionImpl,
                             clean_transcript = Some(tls13::emit_client_kem_ciphertext(&mut handshake, sess, ciphertext));
 
                             // CHTS <- HKDF.Expand (HS, "c hs traffic", H(CH, . . . , CKC))
-                            transcript_hash = handshake.transcript.get_current_hash();
+                            // we have to use this function since transcript.ctx is empty (client and server did not agree
+                            // on a hash algorithm)
+                            transcript_hash = handshake.transcript.get_hash_given(ALL_CIPHERSUITES[0].get_hash(),&[]);
                             let client_handshake_traffic_secret = hs.client_handshake_traffic_secret(&transcript_hash,
                                                                                         &*sess.config.key_log,
                                                                                         &handshake.randoms.client);

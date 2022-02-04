@@ -247,7 +247,7 @@ enum_builder! {
         ProactiveClientAuth => 0xfff2,
         
         // 1RTT-KEMTLS
-        ProactiveCiphertextKEMTLS => 0xfff3,
+        ProactiveCiphertextSSKEMTLS => 0xfff3,
         AcceptedEpoch => 0xfff4,
     }
 }
