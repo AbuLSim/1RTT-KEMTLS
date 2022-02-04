@@ -272,7 +272,7 @@ impl ExpectServerPublicKey {
 }
 
 impl hs::State for ExpectServerPublicKey {
-    fn handle(self: Box<Self>, sess: &mut ClientSessionImpl, m: Message) -> hs::NextStateOrError {
+    fn handle(self: Box<Self>, _sess: &mut ClientSessionImpl, m: Message) -> hs::NextStateOrError {
         let mut spk = None;
         match require_handshake_msg!(m, HandshakeType::ServerPublicKey, HandshakePayload::ServerPublicKey){
             Ok(server_public_key) => {
@@ -617,15 +617,15 @@ impl hs::State for ExpectCertificateOrCertReq {
 
 /// KEMTLS Expect Ciphertext
 pub struct ExpectCiphertext {
-    handshake: HandshakeDetails,
-    key_schedule: KeyScheduleHandshake,
-    client_auth: ClientAuthDetails,
-    is_pdk: bool,
+  pub handshake: HandshakeDetails,
+  pub key_schedule: KeyScheduleHandshake,
+  pub client_auth: ClientAuthDetails,
+  pub is_pdk: bool,
     // 1RTT_KEMTLS
-    is_eq_epoch_sskemtls: Option<bool>,
-    ephemeral_key: Option<Vec<u8>>,
-    server_cert: Option<ServerCertDetails>,
-    hello: Option<ClientHelloDetails>,
+  pub is_eq_epoch_sskemtls: Option<bool>,
+  pub ephemeral_key: Option<Vec<u8>>,
+  pub server_cert: Option<ServerCertDetails>,
+  pub hello: Option<ClientHelloDetails>,
 }
 
 impl ExpectCiphertext {

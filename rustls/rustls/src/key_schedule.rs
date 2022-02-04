@@ -211,7 +211,7 @@ impl KeyScheduleHandshake {
     }
 
     pub fn early_traffic_secret(
-        &self,
+        &mut self,
         hs_hash: &[u8],
         key_log: &dyn KeyLog,
         client_random: &[u8; 32],

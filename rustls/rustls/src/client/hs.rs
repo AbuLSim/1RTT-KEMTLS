@@ -427,7 +427,7 @@ fn emit_client_hello_for_retry(sess: &mut ClientSessionImpl,
                 tls13::emit_fake_ccs(&mut handshake, sess);
                 // If 1RTT-KEMTLS is activated then use handshake_secret
                 // else use early_key schedule
-                let transcript_hash = handshake.transcript.get_hash_given(ALL_CIPHERSUITES[0].get_hash(), &[]); 
+                let mut transcript_hash = handshake.transcript.get_hash_given(ALL_CIPHERSUITES[0].get_hash(), &[]); 
                 if is_pdssk {
                     // 1RTT-KEMTLS
                     match handshake_secret {
@@ -560,7 +560,7 @@ pub fn sct_list_is_invalid(scts: &SCTList) -> bool {
 }
 
 impl ExpectServerHello {
-    fn start_handshake_traffic(self,
+    fn start_handshake_traffic(mut self,
                                sess: &mut ClientSessionImpl,
                                server_hello: &ServerHelloPayload,
                                 ) ->  NextStateOrError {
@@ -577,14 +577,13 @@ impl ExpectServerHello {
             .ok_or_else(|| illegal_param(sess, "wrong group for key share"))?;
     
         // Ke <- KEM.Decap(ske,Ce)
-        let handshake = &mut self.handshake;
-        handshake.print_runtime("DECAPSULATING EPHEMERAL");
+        (&self.handshake).print_runtime("DECAPSULATING EPHEMERAL");
         let shared = our_key_share.decapsulate(&their_key_share.payload.0)
             .ok_or_else(|| TLSError::PeerMisbehavedError("key exchange failed".to_string()))?;
-        handshake.print_runtime("DECAPSULATED EPHEMERAL");
+        (&self.handshake).print_runtime("DECAPSULATED EPHEMERAL");
         
-        let next_state = if let Some(selected_psk) = server_hello.get_psk_index() {
-            if let Some(ref resuming) = handshake.resuming_session {
+        if let Some(selected_psk) = server_hello.get_psk_index() {
+            if let Some(ref resuming) = self.handshake.resuming_session {
                 let resume_from_suite = sess.find_cipher_suite(resuming.cipher_suite).unwrap();
                 if !resume_from_suite.can_resume_to(suite) {
                     return Err(illegal_param(sess, "server resuming incompatible suite"));
@@ -608,35 +607,37 @@ impl ExpectServerHello {
             // 1RTT-KEMTLS author: not sure what to send here in case of resumption;
             todo!("TODO: Resumption in case of tls 1.3 with preshared keys")
         }else if server_hello.find_extension(ExtensionType::ProactiveCiphertext).is_some() {
-            match server_hello.find_extension(ExtensionType::AcceptedEpoch){
+            let dns_name_ref =  self.handshake.dns_name.clone();
+            let next_state = match server_hello.find_extension(ExtensionType::AcceptedEpoch){
                 Some(_) => // 1RTT-KEMTLS with equal epochs
-                    Some(self.into_expect_ciphertext(handshake_secret.unwrap(), shared, true)),
+                    self.into_expect_ciphertext(handshake_secret.unwrap(), shared.clone(), true),
                 None => { // Either 1RTT-KEMTLS with different epochs or PDK-KEMTLS
                     if handshake_secret.is_some(){
                         // We are in 1RTT-KEMTLS with different epochs
                         // Set the handshake.transcript as (CH, SSKC, SH)
-                        handshake.transcript.copy_transcript(self.clean_transcript.unwrap());
+                        self.handshake.transcript.copy_transcript(self.clean_transcript.take().unwrap());
                         // ES <- HKDF.Extract(0,Ke)
                         let early_secret = KeyScheduleEarly::new(suite.hkdf_algorithm, shared.as_ref());            
                         // EHTS <- HKDF.Expand(ES, "e hs traffic"||H(CH SSKC SH))
                         let write_key = early_secret.early_handshake_traffic_secret(
                                                             &self.handshake.transcript.get_current_hash(),
                                                             &*sess.config.key_log,
-                                                            &handshake.randoms.client);
+                                                            &self.handshake.randoms.client);
                         sess.common.record_layer
                                     .set_message_encrypter(cipher::new_tls13_write(suite, &write_key));
                         // {CKC := ClientKEMCiphertext}_stage 1 : Cs
-                        let ciphertext = ClientExtension::from_extension_to_ciphertext(self.pdkext.unwrap());
-                        tls13::emit_client_kem_ciphertext(handshake, sess, ciphertext);
+                        let ciphertext = ClientExtension::from_extension_to_ciphertext(self.pdkext.take().unwrap());
+                        tls13::emit_client_kem_ciphertext(&mut self.handshake, sess, ciphertext);
                         // HS <- HKDF.Extract(ES,Ks)
-                        let handshake_secret = early_secret.into_handshake(self.proactive_static_shared_secret.unwrap().as_ref());
-                        handshake.print_runtime("DERIVED HS");
+                        let mut handshake_secret = early_secret.into_handshake(self.proactive_static_shared_secret.take().unwrap().as_ref());
+                        self.handshake.print_runtime("DERIVED HS");
 
-                        let hs_hash = handshake.transcript.get_current_hash();
+                        let hs_hash = self.handshake.transcript.get_current_hash();
                         // SHTS <- HKDF.Expand (HS, "s hs traffic" || H(CH, SSKC, SH, CKC))
-                        let server_handshake_traffic_secret = handshake_secret.server_handshake_traffic_secret(&hs_hash,
+                        let server_handshake_traffic_secret = handshake_secret.server_handshake_traffic_secret(
+                                                                                                    &hs_hash,
                                                                                                     &*sess.config.key_log,
-                                                                                                    &handshake.randoms.client);
+                                                                                                    &self.handshake.randoms.client);
                         sess.common
                             .record_layer
                             .set_message_decrypter(cipher::new_tls13_read(suite,&server_handshake_traffic_secret));
@@ -644,80 +645,84 @@ impl ExpectServerHello {
                         // CHTS <- HKDF.Expand (HS, "c hs traffic" || H(CH, SSKC, SH, CKC))
                         let client_handshake_traffic_secret = handshake_secret.client_handshake_traffic_secret(&hs_hash,
                                                                                                     &*sess.config.key_log,
-                                                                                                    &handshake.randoms.client);
+                                                                                                    &self.handshake.randoms.client);
                         // prepare encryption with CHTS
                         sess.common
                             .record_layer
                             .set_message_encrypter(cipher::new_tls13_write(suite,
                                                                         &client_handshake_traffic_secret));
                         // {CC := ClientCertificate}_stage 3 : cert[pk c ]
-                        tls13::emit_certificate_tls13(handshake, &mut self.client_auth.unwrap(), sess);
+                        if let Some(ref mut client_auth) = self.client_auth{
+                            tls13::emit_certificate_tls13(&mut self.handshake, client_auth, sess);
+                        }
                         // ETS <- HKDF.Expand (HS, "c e traffic"kH(CH, SSKC, SH, CKC))
                         let early_traffic_secret = handshake_secret.early_traffic_secret(&hs_hash,
                                                                             &*sess.config.key_log,
-                                                                            &handshake.randoms.client);
+                                                                            &self.handshake.randoms.client);
                         sess.common
                             .record_layer
                             .set_message_encrypter(cipher::new_tls13_write(suite,
                                                                         &early_traffic_secret));
-                        Some(self.into_expect_ciphertext(handshake_secret, shared, false))
+                        self.into_expect_ciphertext(handshake_secret, shared.clone(), false)
                     }else{
                         // We are in PDK-KEMTLS
                         debug!("Using PDK");
                         let early_key_schedule = self.early_key_schedule.take();
                         // ES <- HKDF.Extract(dES, ss)
-                        let key_schedule = early_key_schedule.unwrap().into_handshake(&shared);
+                        let mut key_schedule = early_key_schedule.unwrap().into_handshake(&shared);
                         // XXX: transmit CCS as late as possible. This seems to fix weird TCP side effects
                         // with large certificates (Dilithium).
                         // tls13::emit_fake_ccs(&mut self.handshake, sess);
                         let write_key = key_schedule.client_handshake_traffic_secret(
-                                    &handshake.hash_at_client_recvd_server_hello,
+                                    &self.handshake.transcript.get_current_hash(),
                                     &*sess.config.key_log,
-                                    &handshake.randoms.client);
+                                    &self.handshake.randoms.client);
                         sess.common.record_layer
                             .set_message_encrypter(cipher::new_tls13_write(suite, &write_key));
                         // SHTS <- HKDF.Expand(HS, "s hs traffic", CH..SH)
-                        let read_key = key_schedule.server_handshake_traffic_secret(&handshake.hash_at_client_recvd_server_hello,
+                        let read_key = key_schedule.server_handshake_traffic_secret(
+                                                        &self.handshake.hash_at_client_recvd_server_hello,
                                                         &*sess.config.key_log,
-                                                        &handshake.randoms.client);
+                                                        &self.handshake.randoms.client);
                         sess.common.record_layer
                             .set_message_decrypter(cipher::new_tls13_read(suite, &read_key));
-                        Some(self.into_expect_tls13_encrypted_extensions(key_schedule, true))
+                        self.into_expect_tls13_encrypted_extensions(key_schedule, true)
                     }
                 },
-            }
+            };
+             // Remember what KX group the server liked for next time.
+            tls13::save_kx_hint(sess, dns_name_ref.as_ref(), their_key_share.group);
+            // If we change keying when a subsequent handshake message is being joined,
+            // the two halves will have different record layer protections.  Disallow this.
+            check_aligned_handshake(sess)?;
+            return Ok(next_state);
         } else {
             debug!("Not resuming");
             // Discard the early data key schedule.
             sess.early_data.rejected();
             sess.common.early_traffic = false;
-            handshake.resuming_session.take();
-            None
-        };
+            self.handshake.resuming_session.take();
+            // Remember what KX group the server liked for next time.
+            tls13::save_kx_hint(sess, self.handshake.dns_name.as_ref(), their_key_share.group);
+            // If we change keying when a subsequent handshake message is being joined,
+            // the two halves will have different record layer protections.  Disallow this.
+            check_aligned_handshake(sess)?;
 
-        // Remember what KX group the server liked for next time.
-        tls13::save_kx_hint(sess, handshake.dns_name.as_ref(), their_key_share.group);
-        // If we change keying when a subsequent handshake message is being joined,
-        // the two halves will have different record layer protections.  Disallow this.
-        check_aligned_handshake(sess)?;
-        
-        if next_state.is_none(){
-            let is_ssrttkemtls = handshake_secret.is_some();
-
-            let key_schedule = KeyScheduleNonSecret::new(suite.hkdf_algorithm).into_handshake(&shared);
-            handshake.hash_at_client_recvd_server_hello = handshake.transcript.get_current_hash();
+            let mut key_schedule = KeyScheduleNonSecret::new(suite.hkdf_algorithm).into_handshake(&shared);
+            self.handshake.hash_at_client_recvd_server_hello = self.handshake.transcript.get_current_hash();
             if !sess.early_data.is_enabled() {
                 // CHTS <- HKDF.Expand(HS, "c hs traffic", H(CH..SH))
                 let write_key = key_schedule.client_handshake_traffic_secret(
-                                    &handshake.hash_at_client_recvd_server_hello,
+                                    &self.handshake.hash_at_client_recvd_server_hello,
                                     &*sess.config.key_log,
-                                    &handshake.randoms.client);
+                                    &self.handshake.randoms.client);
                 sess.common.record_layer
                     .set_message_encrypter(cipher::new_tls13_write(suite, &write_key));
                 // SHTS <- HKDF.Expand(HS, "s hs traffic", CH..SH)
-                let read_key = key_schedule.server_handshake_traffic_secret(&handshake.hash_at_client_recvd_server_hello,
+                let read_key = key_schedule.server_handshake_traffic_secret(
+                                                &self.handshake.hash_at_client_recvd_server_hello,
                                                 &*sess.config.key_log,
-                                                &handshake.randoms.client);
+                                                &self.handshake.randoms.client);
                 sess.common.record_layer
                     .set_message_decrypter(cipher::new_tls13_read(suite, &read_key));
                 #[cfg(feature = "quic")] {
@@ -730,22 +735,21 @@ impl ExpectServerHello {
                 #[cfg(feature = "quic")] {
                     // Traffic secret wasn't computed and stored above, so do it here.
                     let write_key = key_schedule
-                            .client_handshake_traffic_secret(&handshake.hash_at_client_recvd_server_hello,
+                            .client_handshake_traffic_secret(&self.handshake.hash_at_client_recvd_server_hello,
                                                             &*sess.config.key_log,
-                                                            &handshake.randoms.client);
+                                                            &self.handshake.randoms.client);
                     let read_key = key_schedule
-                            .server_handshake_traffic_secret(&handshake.hash_at_client_recvd_server_hello,
+                            .server_handshake_traffic_secret(&self.handshake.hash_at_client_recvd_server_hello,
                                                             &*sess.config.key_log,
-                                                            &handshake.randoms.client);
+                                                            &self.handshake.randoms.client);
                     sess.common.quic.hs_secrets = Some(quic::Secrets {
                         client: write_key,
                         server: read_key,
                     });
                 }
             }
-            next_state = Some(self.into_expect_tls13_encrypted_extensions(key_schedule, false));
+            return Ok(self.into_expect_tls13_encrypted_extensions(key_schedule, false))
         }
-        return Ok(next_state.unwrap())
     }
 
     // 1RTT-KEMTLS
@@ -903,15 +907,10 @@ impl State for ExpectServerHello {
         }
 
         // prepare SHTS for 1RTT-KEMTLS before adding the HS to transcript
-        match self.handshake_secret {
-            None => panic!("problem in handshake secret"),
-            Some(ref mut hs) => {
-                // prepare decryption with SHTS
-                sess.common
-                    .record_layer
-                    .start_decrypting();
-                debug!("Attempting semi-static 1RTT KEMTLS client stage 2"); 
-            },
+        if self.handshake_secret.is_some() {
+            // prepare decryption with SHTS
+            sess.common.record_layer.start_decrypting();
+            debug!("Attempting semi-static 1RTT KEMTLS client stage 2"); 
         }
         // Start our handshake hash, and input the server-hello.
         let starting_hash = sess.common.get_suite_assert().get_hash();
@@ -920,7 +919,7 @@ impl State for ExpectServerHello {
         // if we are in 1RTT-KEMTLS then we have to add SH to the clean transcript
         // later on, if the epochs do not match, then handshake.transcript will be 
         // replaced by clean_transcript which contains (CH, SSKC, SH)
-        if let Some(clean_transcript) = self.clean_transcript{
+        if let Some(ref mut clean_transcript) = self.clean_transcript{
             clean_transcript.add_message(&m);
         };
 
