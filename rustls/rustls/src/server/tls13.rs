@@ -378,6 +378,7 @@ impl CompleteClientHelloHandling {
         trace!("sending encrypted extensions {:?}", ee);
         self.handshake.transcript.add_message(&ee);
         sess.common.send_msg(ee, true);
+        self.handshake.print_runtime("EMITTED ENCRYPTED EXTENTIONS");
         Ok(())
     }
 
@@ -945,7 +946,6 @@ impl CompleteClientHelloHandling {
             self.maybe_emit_server_public_key(sess)?;
         }
         self.emit_encrypted_extensions(sess, &mut server_key, client_hello, resumedata.as_ref(), doing_pdk)?;
-
         let (doing_client_auth, is_kemtls) = if full_handshake {
             let client_auth;
             let is_kemtls = if !doing_pdk {
@@ -983,9 +983,11 @@ impl CompleteClientHelloHandling {
                     return Err(TLSError::NoCertificatesPresented);
                 }
                 let cert = cert.unwrap();
+
                 // emit ciphertext XXX copied from ExpectCertificate.emit_ciphertext
                 let certificate = webpki::EndEntityCert::from(&cert.cert_chain[0].0)
                     .map_err(TLSError::WebPKIError)?;
+                
                 self.handshake.print_runtime("PDK ENCAPSULATING TO CCERT");
                 let (ct, ss) = certificate.encapsulate().map_err(|_| TLSError::DecryptError)?;
                 self.handshake.print_runtime("PDK ENCAPSULATED TO CCERT");
@@ -999,7 +1001,6 @@ impl CompleteClientHelloHandling {
                 };
                 self.handshake.transcript.add_message(&m);
                 sess.common.send_msg(m, true);
-
                 let ks = emit_finished_kemtlspdk(&mut self.handshake, sess, key_schedule, Some(ss.as_ref()));
                 Ok(self.into_expect_finished(ks, true))
             } else if is_eq_epoch == Some(false) { // unequal epochs
@@ -1285,6 +1286,7 @@ fn emit_finished_kemtlspdk(
 
     // SATS <- HKDF.Expand(MS, "s app traffic", H(CH..SF))
     let suite = sess.common.get_suite_assert();
+
     let write_key = key_schedule
         .server_application_traffic_secret(&handshake.hash_at_server_fin,
                                            &*sess.config.key_log,
@@ -1303,7 +1305,6 @@ fn emit_finished_kemtlspdk(
             server: write_key,
         });
     }
-
     key_schedule
 }
 

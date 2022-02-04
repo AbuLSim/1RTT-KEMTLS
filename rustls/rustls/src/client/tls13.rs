@@ -339,7 +339,7 @@ impl hs::State for ExpectEncryptedExtensions {
     fn handle(mut self: Box<Self>, sess: &mut ClientSessionImpl, m: Message) -> hs::NextStateOrError {
         let exts = require_handshake_msg!(m, HandshakeType::EncryptedExtensions, HandshakePayload::EncryptedExtensions)?;
         debug!("TLS1.3 encrypted extensions: {:?}", exts);
-        
+        self.handshake.print_runtime("RECEIVED ENCRYPTED EXTENTIONS");
         self.handshake.transcript.add_message(&m);
 
         validate_encrypted_extensions(sess, &self.hello, &exts)?;
@@ -922,12 +922,13 @@ pub fn emit_certificate_tls13(handshake: &mut HandshakeDetails,
     let context = client_auth.auth_context
         .take()
         .unwrap_or_else(Vec::new);
-    
+
     
     let mut cert_payload = CertificatePayloadTLS13 {
         context: PayloadU8::new(context),
         entries: Vec::new(),
     };
+
 
     if let Some(cert_chain) = client_auth.cert.as_ref() {
         for cert in cert_chain {

@@ -581,7 +581,7 @@ impl ExpectServerHello {
         let shared = our_key_share.decapsulate(&their_key_share.payload.0)
             .ok_or_else(|| TLSError::PeerMisbehavedError("key exchange failed".to_string()))?;
         (&self.handshake).print_runtime("DECAPSULATED EPHEMERAL");
-        
+
         if let Some(selected_psk) = server_hello.get_psk_index() {
             if let Some(ref resuming) = self.handshake.resuming_session {
                 let resume_from_suite = sess.find_cipher_suite(resuming.cipher_suite).unwrap();
@@ -670,6 +670,7 @@ impl ExpectServerHello {
                         let early_key_schedule = self.early_key_schedule.take();
                         // ES <- HKDF.Extract(dES, ss)
                         let mut key_schedule = early_key_schedule.unwrap().into_handshake(&shared);
+
                         // XXX: transmit CCS as late as possible. This seems to fix weird TCP side effects
                         // with large certificates (Dilithium).
                         // tls13::emit_fake_ccs(&mut self.handshake, sess);
@@ -681,11 +682,12 @@ impl ExpectServerHello {
                             .set_message_encrypter(cipher::new_tls13_write(suite, &write_key));
                         // SHTS <- HKDF.Expand(HS, "s hs traffic", CH..SH)
                         let read_key = key_schedule.server_handshake_traffic_secret(
-                                                        &self.handshake.hash_at_client_recvd_server_hello,
+                                                        &self.handshake.transcript.get_current_hash(),
                                                         &*sess.config.key_log,
                                                         &self.handshake.randoms.client);
                         sess.common.record_layer
                             .set_message_decrypter(cipher::new_tls13_read(suite, &read_key));
+                        
                         self.into_expect_tls13_encrypted_extensions(key_schedule, true)
                     }
                 },
