@@ -248,7 +248,7 @@ enum_builder! {
         
         // 1RTT-KEMTLS
         ProactiveCiphertextSSKEMTLS => 0xfff3,
-        AcceptedEpoch => 0xfff4,
+        IsEqualEpoch => 0xfff4,
     }
 }
 

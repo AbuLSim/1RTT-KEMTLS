@@ -890,9 +890,10 @@ pub enum ServerExtension {
     TransportParameters(Vec<u8>),
     EarlyData,
     ProactiveCiphertextAccepted(PayloadU8),
-    // 1RTT-KEMTLS
     CachedInformation(CachedInfoTypes),
     Unknown(UnknownExtension),
+    // 1RTT-KEMTLS
+    IsEqualEpoch,
 }
 
 impl ServerExtension {
@@ -914,6 +915,7 @@ impl ServerExtension {
             ServerExtension::Unknown(ref r) => r.typ,
             ServerExtension::CachedInformation(_) => ExtensionType::CachedInformation,
             ServerExtension::ProactiveCiphertextAccepted(_) => ExtensionType::ProactiveCiphertext,
+            ServerExtension::IsEqualEpoch => ExtensionType::IsEqualEpoch,
         }
     }
 }
@@ -929,7 +931,8 @@ impl Codec for ServerExtension {
                 ServerExtension::SessionTicketAck |
                 ServerExtension::ExtendedMasterSecretAck |
                 ServerExtension::CertificateStatusAck |
-                ServerExtension::EarlyData => (),
+                ServerExtension::EarlyData |
+                ServerExtension::IsEqualEpoch => (),
             ServerExtension::RenegotiationInfo(ref r) => r.encode(&mut sub),
             ServerExtension::Protocols(ref r) => r.encode(&mut sub),
             ServerExtension::KeyShare(ref r) => r.encode(&mut sub),
@@ -984,6 +987,7 @@ impl Codec for ServerExtension {
             ExtensionType::CachedInformation => ServerExtension::CachedInformation(CachedInfoTypes::read(&mut sub)?),
             ExtensionType::ProactiveCiphertext => ServerExtension::ProactiveCiphertextAccepted(PayloadU8::read(&mut sub)?),
             // 1RTT-KEMTLS
+            ExtensionType::IsEqualEpoch => ServerExtension::IsEqualEpoch,
             ExtensionType::EarlyData => ServerExtension::EarlyData,
             _ => ServerExtension::Unknown(UnknownExtension::read(typ, &mut sub)?),
         })

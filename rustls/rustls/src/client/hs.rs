@@ -308,8 +308,10 @@ fn emit_client_hello_for_retry(sess: &mut ClientSessionImpl,
         false
     };
 
+    let is_pdk = proactive_static_shared_secret.is_some();
+
     // indicate KEMTLS-PDK client auth is coming
-    if sess.config.client_auth_cert_resolver.has_certs() && proactive_static_shared_secret.is_some() {
+    if sess.config.client_auth_cert_resolver.has_certs() && is_pdk {
         exts.push(ClientExtension::ProactiveClientAuth);
     }
 
@@ -356,7 +358,6 @@ fn emit_client_hello_for_retry(sess: &mut ClientSessionImpl,
     };
 
 
-    let is_pdk = proactive_static_shared_secret.is_some();
 
     let ch = Message {
         typ: ContentType::Handshake,
@@ -610,7 +611,7 @@ impl ExpectServerHello {
             todo!("TODO: Resumption in case of tls 1.3 with preshared keys")
         }else if server_hello.find_extension(ExtensionType::ProactiveCiphertext).is_some() {
             let dns_name_ref =  self.handshake.dns_name.clone();
-            let next_state = match server_hello.find_extension(ExtensionType::AcceptedEpoch){
+            let next_state = match server_hello.find_extension(ExtensionType::IsEqualEpoch){
                 Some(_) => // 1RTT-KEMTLS with equal epochs
                     self.into_expect_ciphertext(handshake_secret.unwrap(), shared.clone(), true),
                 None => { // Either 1RTT-KEMTLS with different epochs or PDK-KEMTLS
