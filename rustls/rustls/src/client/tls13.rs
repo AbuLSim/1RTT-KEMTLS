@@ -926,7 +926,7 @@ pub fn emit_client_kem_ciphertext(handshake: &mut HandshakeDetails,
     let non_eq_epoch_transcript = handshake.transcript.clone();
     handshake.transcript.add_message(&m);
     handshake.print_runtime("EMIT ClientKEMCiphertext");
-    sess.common.send_msg(m, true);    
+    sess.common.send_msg(m, true);
     non_eq_epoch_transcript
 }
 

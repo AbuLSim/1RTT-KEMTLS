@@ -129,10 +129,6 @@ impl HandshakeHash {
             warn!("No data to copy from transcript in HandshakeHash::copy_transcript");
             return false;
         }
-        if !transcript.buffer.is_empty() || !self.buffer.is_empty(){
-            warn!("No emptied transcripts buffers in HandshakeHash::copy_transcript");
-            return false;    
-        }
         match transcript.alg {
             None => {
                 warn!("No algorithm to copy from transcript in HandshakeHash::copy_transcript");

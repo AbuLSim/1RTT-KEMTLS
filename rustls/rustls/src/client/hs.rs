@@ -448,7 +448,6 @@ fn emit_client_hello_for_retry(sess: &mut ClientSessionImpl,
                             // {CKC := ClientKEMCiphertext}_stage1 : Cs
                             let ciphertext = ClientExtension::from_extension_to_ciphertext(pdkext.clone().unwrap());
                             clean_transcript = Some(tls13::emit_client_kem_ciphertext(&mut handshake, sess, ciphertext));
-
                             // CHTS <- HKDF.Expand (HS, "c hs traffic", H(CH, . . . , CKC))
                             // we have to use this function since transcript.ctx is empty (client and server did not agree
                             // on a hash algorithm)
@@ -614,7 +613,10 @@ impl ExpectServerHello {
                 None => { // 1RTT-KEMTLS with different epochs
                     // We are in 1RTT-KEMTLS with different epochs
                     // Set the handshake.transcript as (CH, SSKC, SH)
-                    self.handshake.transcript.copy_transcript(self.clean_transcript.take().unwrap());
+                    if !self.handshake.transcript.copy_transcript(self.clean_transcript.take().unwrap()){
+                        panic!("error copying the clean transcript");
+                    };
+
                     // ES <- HKDF.Extract(0,Ke)
                     let early_secret = KeyScheduleEarly::new(suite.hkdf_algorithm, shared.as_ref());            
                     // EHTS <- HKDF.Expand(ES, "e hs traffic"||H(CH SSKC SH))
@@ -923,10 +925,12 @@ impl State for ExpectServerHello {
         let starting_hash = sess.common.get_suite_assert().get_hash();
         self.handshake.transcript.start_hash(starting_hash);
         self.handshake.transcript.add_message(&m);
+
         // if we are in 1RTT-KEMTLS then we have to add SH to the clean transcript
         // later on, if the epochs do not match, then handshake.transcript will be 
         // replaced by clean_transcript which contains (CH, SSKC, SH)
         if let Some(ref mut clean_transcript) = self.clean_transcript{
+            clean_transcript.start_hash(sess.common.get_suite_assert().get_hash());
             clean_transcript.add_message(&m);
         };
 
