@@ -96,7 +96,7 @@ This repository accompanies
 	
 	or depending on which sub-protocol one would like to run (check **KEMTLS with Delayed Forward Identity Protection in (Almost) a Single Round Trip**) you can also type
 	
-	``cargo run --example tlsserver -- --port 10001 --certs ../../certificates/1RTT-KEMTLS/kem.crt --key ../../certificates/1RTT-KEMTLS/kem.key --require-auth  --auth ../../certificates/1RTT-KEMTLS/client-ca.crt --1rtt-key ../../certificates/1RTT-KEMTLS/kem_ssrttkemtls.key  --1rtt-public ../../certificates/1RTT-KEMTLS/kem_ssrttkemtls.pub --1rtt-epoch ../../certificates/1RTT-KEMTLS/server.epoch  --1rtt-key-next ../../certificates/1RTT-KEMTSL/semistatic-epoch-2.key --1rtt-epoch-next ../../certificates/1RTT-KEMTSL/semistatic-epoch-2.epoch --1rtt-public-next ../../certificates/1RTT-KEMTSL/semistatic-epoch-2.pub http``
+	``cargo run --example tlsserver -- --port 10001 --certs ../../certificates/1RTT-KEMTLS/kem.crt --key ../../certificates/1RTT-KEMTLS/kem.key --require-auth  --auth ../../certificates/1RTT-KEMTLS/client-ca.crt --1rtt-key ../../certificates/1RTT-KEMTLS/kem_ssrttkemtls.key  --1rtt-public ../../certificates/1RTT-KEMTLS/kem_ssrttkemtls.pub --1rtt-epoch ../../certificates/1RTT-KEMTLS/server.epoch  --1rtt-key-next ../../certificates/1RTT-KEMTLS/semistatic-epoch-2.key --1rtt-epoch-next ../../certificates/1RTT-KEMTLS/semistatic-epoch-2.epoch --1rtt-public-next ../../certificates/1RTT-KEMTLS/semistatic-epoch-2.pub http``
 	
 	In parallel, run the client with
 	
