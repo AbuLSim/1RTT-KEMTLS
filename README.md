@@ -2,8 +2,8 @@
 
 This repository accompanies
 
-* Felix Günther and Patrick Towa. **KEMTLS with Delayed Forward Identity Protection in (Almost) a Single Round Trip.** Draft paper
-* Peter Schwabe, Douglas Stebila and Thom Wiggers. **More efficient KEMTLS with pre-distributed public keys.** Draft paper
+* Felix Günther, Simon Rastikian, Patrick Towa and Thom Wiggers. **KEMTLS with Delayed Forward Identity Protection in (Almost) a Single Round Trip.** Draft paper
+* Peter Schwabe, Douglas Stebila and Thom Wiggers. **More efficient KEMTLS with pre-distributed public keys.** ESORICS 2021.
 * Peter Schwabe, Douglas Stebila and Thom Wiggers. **Post-quantum TLS without handshake signatures.** ACM CCS 2020.
 * Peter Schwabe, Douglas Stebila and Thom Wiggers. **Post-quantum TLS without handshake signatures.** IACR Cryptology ePrint Archive, Report 2020/534. April 2021.
 
@@ -90,7 +90,7 @@ This repository accompanies
 	options that will allow you to either run tls 1.3, or KEMTLS, or KEMTLS-PDK, or KEMTLS-PDK-SS (a.k.a. 1RTT-KEMTLS)
 * Now let's run the KEMTLS-PDK-SS (Key Encapsulation Mecanism TLS with pre-distributed keys and semi-static keys)
 	
-	Run the server by typing 
+	Run the server (without SPK) by typing 
 	
 	``cargo run --example tlsserver -- --port 10001 --certs ../../certificates/1RTT-KEMTLS/kem.crt --key ../../certificates/1RTT-KEMTLS/kem.key --require-auth  --auth ../../certificates/1RTT-KEMTLS/client-ca.crt --1rtt-key ../../certificates/1RTT-KEMTLS/kem_ssrttkemtls.key  --1rtt-public ../../certificates/1RTT-KEMTLS/kem_ssrttkemtls.pub --1rtt-epoch ../../certificates/1RTT-KEMTLS/server.epoch  http``
 	
@@ -98,56 +98,71 @@ This repository accompanies
 	
 	``cargo run --example tlsserver -- --port 10001 --certs ../../certificates/1RTT-KEMTLS/kem.crt --key ../../certificates/1RTT-KEMTLS/kem.key --require-auth  --auth ../../certificates/1RTT-KEMTLS/client-ca.crt --1rtt-key ../../certificates/1RTT-KEMTLS/kem_ssrttkemtls.key  --1rtt-public ../../certificates/1RTT-KEMTLS/kem_ssrttkemtls.pub --1rtt-epoch ../../certificates/1RTT-KEMTLS/server.epoch  --1rtt-key-next ../../certificates/1RTT-KEMTLS/semistatic-epoch-2.key --1rtt-epoch-next ../../certificates/1RTT-KEMTLS/semistatic-epoch-2.epoch --1rtt-public-next ../../certificates/1RTT-KEMTLS/semistatic-epoch-2.pub http``
 	
+   If you want to test KEMTLS-PDK-SS in the non-equal epochs case run the server using
+
+   ``cargo run --example tlsserver -- --port 10001 --certs ../../certificates/1RTT-KEMTLS/kem.crt --key ../../certificates/1RTT-KEMTLS/kem.key --require-auth  --auth ../../certificates/1RTT-KEMTLS/client-ca.crt --1rtt-key ../../certificates/1RTT-KEMTLS/semistatic-epoch-1.key  --1rtt-public ../../certificates/1RTT-KEMTLS/semistatic-epoch-1.pub --1rtt-epoch ../../certificates/1RTT-KEMTLS/semistatic-epoch-1.epoch  http``
+
 	In parallel, run the client with
 	
 	``cargo run --example tlsclient -- -p 10001 --http --cafile ../../certificates/1RTT-KEMTLS/kem.chain.crt --auth-key ../../certificates/1RTT-KEMTLS/client.key --auth-certs ../../certificates/1RTT-KEMTLS/client.crt --1rtt-pk ../../certificates/1RTT-KEMTLS/kem_ssrttkemtls.pub --1rtt-epoch ../../certificates/1RTT-KEMTLS/client.epoch --cached-certs ../../certificates/1RTT-KEMTLS/kem.crt servername``
 	
+
 	Depending on the client and server epoch numbers (if they are equal or different) one round trip KEMTLS-SS protocol is used
 	or the two round trip KEMTLS-SS is used.
 	
 Depending on what subprotocol you chose, you should be seeing something like:
 at the client side:
 ```
-START: 1115 ns
-CREATED PDK ENCAPSULATION: 187481 ns
-CREATED PDK 1RTT-KEMTLS ENCAPSULATION: 216550 ns
-CREATING KEYSHARES: 226597 ns
-CREATED KEYSHARES: 260368 ns
-DERIVED HS: 304487 ns
-SENDING CHELO: 321083 ns
-EMIT CERT: 600959 ns
-RECEIVED SH: 2101841 ns
-DECAPSULATING EPHEMERAL: 2170121 ns
-DECAPSULATED EPHEMERAL: 2197520 ns
-DECAPSULATING FROM CCERT: 2220955 ns
-DECAPSULATED FROM CCERT: 2248128 ns
-DERIVED MS: 2335480 ns
-RECEIVED FINISHED: 2410501 ns
-EMITTED FINISHED: 2455681 ns
-WRITING TO SERVER: 2532896 ns
-HANDSHAKE COMPLETED: 2540453 ns
-RECEIVED SERVER REPLY: 2912962 ns
+START: 936 ns
+CREATED PDK ENCAPSULATION: 4800210 ns
+CREATED PDK 1RTT-KEMTLS ENCAPSULATION: 4956372 ns
+CREATING KEYSHARES: 5018575 ns
+CREATED KEYSHARES: 5172810 ns
+DERIVED HS: 5360818 ns
+SENDING CHELO: 5381291 ns
+EMIT ClientKEMCiphertext: 6483537 ns
+EMIT CERT: 6884752 ns
+RECEIVED SH: 11582565 ns
+DECAPSULATING EPHEMERAL: 11803979 ns
+DECAPSULATED EPHEMERAL: 11869494 ns
+DECAPSULATING FROM CCERT: 12020810 ns
+DECAPSULATED FROM CCERT: 12088420 ns
+DERIVED MS: 12311060 ns
+RECEIVED SPK: 12385722 ns
+RECEIVED ENCRYPTED EXTENTIONS: 12484202 ns
+RECEIVED FINISHED: 12582743 ns
+EMITTED FINISHED: 12683227 ns
+WRITING TO SERVER: 12861229 ns
+HANDSHAKE COMPLETED: 12872904 ns
+RECEIVED SERVER REPLY: 13943294 ns
 HTTP/1.0 200 OK
 Connection: close
+
 Hello world from rustls tlsserver
 ```
 
 at the server side:
 ```
-RECEIVED CLIENT HELLO: 82 ns
-PDK DECAPSULATING FROM CERTIFICATE: 323267 ns
-PDK DECAPSULATED FROM CERTIFICATE: 375516 ns
-PDK 1RTT-KEMTLS DECAPSULATING FROM SEMISTATIC: 453210 ns
-PDK 1RTT-KEMTLS DECAPSULATED FROM SEMISTATIC: 474026 ns
-DERIVED HS: 610155 ns
-ENCAPSULATING TO EPHEMERAL: 800827 ns
-ENCAPSULATED TO EPHEMERAL: 866040 ns
-EMITTED SH: 958572 ns
-DERIVED MS: 1036618 ns
-WRITING TO CLIENT: 1118664 ns
-RECEIVED FINISHED: 1741114 ns
-READING TRAFFIC: 1877086 ns
-HANDSHAKE COMPLETED: 1882143 ns
+RECEIVED CLIENT HELLO: 272 ns
+PDK 1RTT-KEMTLS DECAPSULATING FROM SEMISTATIC: 1071334 ns
+PDK 1RTT-KEMTLS DECAPSULATED FROM SEMISTATIC: 1207107 ns
+RECEIVED CCIPHERTEXT: 1691235 ns
+DECAPSULATING FROM CERTIFICATE: 1743405 ns
+DECAPSULATED FROM CERTIFICATE: 1795005 ns
+DERIVED HS: 1973951 ns
+ENCAPSULATING TO EPHEMERAL: 2427024 ns
+ENCAPSULATED TO EPHEMERAL: 2611320 ns
+EMITTED SH: 2726623 ns
+PDK ENCAPSULATING TO CCERT: 2768189 ns
+PDK ENCAPSULATED TO CCERT: 2830800 ns
+SENT SKC: 2918201 ns
+DERIVED MS: 3114838 ns
+SENT SPK: 3212514 ns
+EMITTED ENCRYPTED EXTENTIONS: 3284761 ns
+WRITING TO CLIENT: 3436578 ns
+RECEIVED FINISHED: 5363360 ns
+READING TRAFFIC: 5677738 ns
+HANDSHAKE COMPLETED: 5690951 ns
 ```
 
 
