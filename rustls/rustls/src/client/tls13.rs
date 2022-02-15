@@ -55,6 +55,8 @@ static ALLOWED_PLAINTEXT_EXTS: &[ExtensionType] = &[
     ExtensionType::SupportedVersions,
     ExtensionType::ProactiveCiphertext,
     ExtensionType::ProactiveCiphertextSSKEMTLS,
+    ExtensionType::IsEqualEpoch,
+
 ];
 
 // Only the intersection of things we offer, and those disallowed
@@ -272,17 +274,29 @@ impl ExpectServerPublicKey {
 }
 
 impl hs::State for ExpectServerPublicKey {
-    fn handle(self: Box<Self>, _sess: &mut ClientSessionImpl, m: Message) -> hs::NextStateOrError {
+    fn handle(mut self: Box<Self>, sess: &mut ClientSessionImpl, m: Message) -> hs::NextStateOrError {
         let mut spk = None;
         match require_handshake_msg!(m, HandshakeType::ServerPublicKey, HandshakePayload::ServerPublicKey){
-            Ok(server_public_key) => {
+            Ok(server_public_key) => { // consume message
                 self.handshake.print_runtime("RECEIVED SPK");
+                self.handshake.transcript.add_message(&m);
                 spk = Some(server_public_key.clone());
+                Ok(self.into_expect_tls13_encrypted_extensions(spk))
             },
-            Err(_) => {},
+            Err(_) => { // do not consume message
+                let ee =  Box::new(ExpectEncryptedExtensions {
+                    handshake: self.handshake,
+                    key_schedule: self.key_schedule,
+                    server_cert: self.server_cert,
+                    hello: self.hello,
+                    is_pdk: true,
+                    is_sskemtls: true,
+                    client_auth: self.client_auth,
+                    spk,
+                }); 
+                ExpectEncryptedExtensions::handle(ee,sess,m)
+            }
         }
-        // proceed with Encrypted Extensions
-        Ok(self.into_expect_tls13_encrypted_extensions(spk))
     }
 }
 
@@ -694,7 +708,7 @@ impl hs::State for ExpectCiphertext {
         self.handshake.transcript.add_message(&m);
 
         match self.is_eq_epoch_sskemtls {
-            Some(true) => // equal epochs
+            Some(true) =>// equal epochs
                 // IMS <- HKDF.Extract(dHS,Ke); derive
                 // MS <- HKDF.Extract(dIMS, Kc)
                 self.key_schedule.into_ssrttkemtls_master_secret(self.ephemeral_key.as_ref().unwrap(), &ss, true),
@@ -706,19 +720,19 @@ impl hs::State for ExpectCiphertext {
         // only 1RTT-KEMTLS
         // add SKC to transcript
         self.handshake.hash_at_client_recvd_server_hello = self.handshake.transcript.get_current_hash();
+        // choose cipher preferred by server
+        let suite = sess.common.get_suite_assert();
+        // CAHTS <- HKDF.Expand(MS, "c ahs traffic"|| H(CH...SKC))
         let write_key =  self.key_schedule.client_authenticated_handshake_traffic_secret(
                                             &self.handshake.hash_at_client_recvd_server_hello,
                                             &*sess.config.key_log,
                                             &self.handshake.randoms.client);
-        let read_key = self.key_schedule.server_authenticated_handshake_traffic_secret(
-                                            &self.handshake.hash_at_client_recvd_server_hello,
-                                            &*sess.config.key_log,
-                                            &self.handshake.randoms.client);
-        // choose cipher preferred by server
-        let suite = sess.common.get_suite_assert();
-        // CAHTS <- HKDF.Expand(MS, "c ahs traffic"|| H(CH...SKC))
         sess.common.record_layer.set_message_encrypter(cipher::new_tls13_write(suite, &write_key));
         // SAHTS <- HKDF.Expand(MS, "s ahs traffic"|| H(CH...SKC))
+        let read_key = self.key_schedule.server_authenticated_handshake_traffic_secret(
+            &self.handshake.hash_at_client_recvd_server_hello,
+            &*sess.config.key_log,
+            &self.handshake.randoms.client);
         sess.common.record_layer.set_message_decrypter(cipher::new_tls13_read(suite, &read_key));
         self.handshake.print_runtime("DERIVED MS"); 
         return Ok(self.into_expect_server_public_key())
@@ -1057,10 +1071,8 @@ impl ExpectFinished {
 
 impl hs::State for ExpectFinished {
     fn handle(self: Box<Self>, sess: &mut ClientSessionImpl, m: Message) -> hs::NextStateOrError {
-        let mut st = *self;
-
         let finished = require_handshake_msg!(m, HandshakeType::Finished, HandshakePayload::Finished)?;
-
+        let mut st = *self;
         st.handshake.print_runtime("RECEIVED FINISHED");
 
         let suite = sess.common.get_suite_assert();
