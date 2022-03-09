@@ -21,4 +21,4 @@ fi
 
 sudo killall -9 tlsserver  || true
 
-sudo -E python3.9 -u scripts/experiment.py $@
+sudo -E python3.10 -u scripts/experiment.py $@
