@@ -235,6 +235,7 @@ fn emit_client_hello_for_retry(sess: &mut ClientSessionImpl,
                 proactive_static_shared_secret = Some(ss);
                 handshake.print_runtime("CREATED PDK ENCAPSULATION")
             } else {
+                debug!("Sending known certificates as in RFC7924");
                 // send the RFC7924 thing if we're not doing PDK
                 exts.push(ClientExtension::make_cached_certs(&sess.config.known_certificates));
             }
@@ -251,9 +252,6 @@ fn emit_client_hello_for_retry(sess: &mut ClientSessionImpl,
                     exts.push(sskc);
                     semi_static_kemtls_key = Some(sskemtls);
                     handshake.print_runtime("CREATED PDK 1RTT-KEMTLS ENCAPSULATION")
-                } else {
-                    // send the RFC7924 thing if we're not doing PDK
-                    exts.push(ClientExtension::make_cached_certs(&sess.config.known_certificates));
                 }
             }
         }

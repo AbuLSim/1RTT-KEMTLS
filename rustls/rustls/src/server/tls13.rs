@@ -1324,8 +1324,12 @@ pub struct ExpectCiphertext {
 
 impl ExpectCiphertext {
     fn into_expect_certificate(self) -> hs::NextState {
+        let handshake = match self.handshake {
+            Some(hs) => hs,
+            None => self.expect_hello.unwrap().handshake,
+        };
         Box::new(ExpectCertificate {
-            handshake: self.handshake.unwrap(),
+            handshake,
             key_schedule: ExpectCertificateKeySchedule::KEMTLS(self.key_schedule.unwrap()),
             send_ticket: self.send_ticket,
         })
