@@ -319,7 +319,7 @@ impl Connection {
 
     fn send_http_response_once(&mut self) {
         let response =
-            b"HTTP/1.0 200 OK\r\nConnection: close\r\n\r\nHello world from rustls tlsserver\r\n";
+        b"HTTP/1.0 200 OK\r\nConnection: close\r\n\r\nHello world from rustls tlsserver\r\n";
         if !self.sent_http_response {
             self.tls_session
                 .write_all(response)
@@ -664,7 +664,7 @@ fn make_config(args: &Args) -> Arc<rustls::ServerConfig> {
             let next_sk = load_private_key(args.flag_1rtt_key_next.as_ref().expect("need --1rtt-key-next with --1rttt-x-next"));
             resolver.set_next(next_ep, next_pk, next_sk);
         } else {
-            println!("Set up 1rtt semistatic without a next epoch key");
+            debug!("Set up 1rtt semistatic without a next epoch key");
         }
         config.ssrtt_resolver = Arc::new(resolver);
     }

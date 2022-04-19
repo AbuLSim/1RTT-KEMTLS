@@ -13,6 +13,7 @@ use crate::log::warn;
 ///
 /// For client auth, we also need to buffer all the messages.
 /// This is disabled in cases where client auth is not possible.
+#[derive(Clone)]
 pub struct HandshakeHash {
     /// None before we know what hash function we're using
     alg: Option<&'static digest::Algorithm>,
@@ -120,6 +121,33 @@ impl HandshakeHash {
         let mut ret = Vec::new();
         ret.extend_from_slice(hash.as_ref());
         ret
+    }
+
+    /// Copies one transcript in self and discards the transcript
+    pub fn copy_transcript(&mut self, transcript: HandshakeHash) -> bool {
+        if transcript.ctx.is_none(){
+            warn!("No data to copy from transcript in HandshakeHash::copy_transcript");
+            return false;
+        }
+        match transcript.alg {
+            None => {
+                warn!("No algorithm to copy from transcript in HandshakeHash::copy_transcript");
+                return false;
+            },
+            Some(transcript_alg) => {
+                    match self.alg {
+                        Some(alg) => {
+                            if alg != transcript_alg {
+                                warn!("altered hash to HandshakeHash::copy_transcript");
+                                return false;
+                            };
+                        },
+                        None => {},
+                }
+            }
+        }
+        self.ctx.replace(transcript.ctx.unwrap());
+        return true;
     }
 
     /// Take the current hash value, and encapsulate it in a

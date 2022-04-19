@@ -13,8 +13,10 @@ use ring::{
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum SecretKind {
     ResumptionPSKBinderKey,
-    // ES
+    // ES, CETS
     ClientEarlyTrafficSecret,
+    // EHTS
+    EarlyHandshakeTrafficSecret,
     // CHTS
     ClientHandshakeTrafficSecret,
     // SHTS
@@ -37,6 +39,7 @@ impl SecretKind {
         match self {
             SecretKind::ResumptionPSKBinderKey => b"res binder",
             SecretKind::ClientEarlyTrafficSecret => b"c e traffic",
+            SecretKind::EarlyHandshakeTrafficSecret => b"e hs traffic",
             SecretKind::ClientHandshakeTrafficSecret => b"c hs traffic",
             SecretKind::ServerHandshakeTrafficSecret => b"s hs traffic",
             SecretKind::ClientAuthenticatedHandshakeTrafficSecret => b"c ahs traffic",
@@ -54,6 +57,7 @@ impl SecretKind {
         Some(match self {
             ClientEarlyTrafficSecret => "CLIENT_EARLY_TRAFFIC_SECRET",
             ClientHandshakeTrafficSecret => "CLIENT_HANDSHAKE_TRAFFIC_SECRET",
+            EarlyHandshakeTrafficSecret => "EARLY_HANDSHAKE_TRAFFIC_SECRET",            
             ServerHandshakeTrafficSecret => "SERVER_HANDSHAKE_TRAFFIC_SECRET",
             ClientAuthenticatedHandshakeTrafficSecret => {
                 "CLIENT_AUTHENTICATED_HANDSHAKE_TRAFFIC_SECRET"
@@ -74,6 +78,7 @@ impl SecretKind {
 /// This is the TLS1.3 key schedule.  It stores the current secret and
 /// the type of hash.  This isn't used directly; but only through the
 /// typestates.
+#[derive(Clone)]
 struct KeySchedule {
     current: hkdf::Prk,
     algorithm: ring::hkdf::Algorithm,
@@ -100,6 +105,7 @@ pub trait KeyScheduleComputesServerFinish {
 // at a given point.
 
 /// KeySchedule for early data stage.
+#[derive(Clone)]
 pub struct KeyScheduleEarly {
     ks: KeySchedule,
 }
@@ -124,6 +130,21 @@ impl KeyScheduleEarly {
             client_random,
         )
     }
+
+    pub fn early_handshake_traffic_secret(
+        &self,
+        hs_hash: &[u8],
+        key_log: &dyn KeyLog,
+        client_random: &[u8; 32],
+    ) -> hkdf::Prk {
+        self.ks.derive_logged_secret(
+            SecretKind::EarlyHandshakeTrafficSecret,
+            hs_hash,
+            key_log,
+            client_random,
+        )
+    }
+
 
     pub fn resumption_psk_binder_key_and_sign_verify_data(&self, hs_hash: &[u8]) -> Vec<u8> {
         let resumption_psk_binder_key = self
@@ -187,6 +208,22 @@ impl KeyScheduleHandshake {
         if !self.authenticated {
             panic!("Expected to have been fed a secret encapsulated to the server's cert.")
         }
+    }
+
+    pub fn early_traffic_secret(
+        &mut self,
+        hs_hash: &[u8],
+        key_log: &dyn KeyLog,
+        client_random: &[u8; 32],
+    ) -> hkdf::Prk {
+        let secret = self.ks.derive_logged_secret(
+            SecretKind::ClientEarlyTrafficSecret,
+            hs_hash,
+            key_log,
+            client_random,
+        );
+        self.current_client_traffic_secret = Some(secret.clone());
+        secret
     }
 
     pub fn client_handshake_traffic_secret(

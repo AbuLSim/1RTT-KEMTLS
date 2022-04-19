@@ -125,10 +125,9 @@ enum_builder! {
         CertificateStatus => 0x16,
         KeyUpdate => 0x18,
         MessageHash => 0xfe,
-        ServerKemCiphertext => 0x20,
-        ClientKemCiphertext => 0x21,
+        KEMCiphertext => 0x20,
         // 1RTT-KEMTLS
-        ServerPublicKey => 0x22,
+        ServerPublicKey => 0x21,
     }
 }
 
@@ -248,7 +247,8 @@ enum_builder! {
         ProactiveClientAuth => 0xfff2,
         
         // 1RTT-KEMTLS
-        ProactiveCiphertextKEMTLS => 0xfff3,
+        ProactiveCiphertextSSKEMTLS => 0xfff3,
+        IsEqualEpoch => 0xfff4,
     }
 }
 
